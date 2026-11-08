@@ -1,0 +1,56 @@
+# StudyFlow AI - .gitignore
+
+# Environment & Secrets (CRITICAL: Never commit secrets)
+.env
+*.env
+!.env.example
+*.pem
+*.key
+credentials.json
+google-services.json
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE & Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local Data, Uploads & Storage (for local PDF/TXT processing)
+/storage/
+/uploads/
+/data/
+*.log
+
+# Python / FastAPI Backend
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Android / Kotlin / Gradle
+*.iml
+.gradle/
+/local.properties
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+/build/
+/*/build/
