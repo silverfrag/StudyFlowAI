@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.data.model.CourseResponse
+import com.studyflow.ai.data.model.DocumentResponse
 import com.studyflow.ai.data.repository.StudyFlowRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,12 @@ class AssistantViewModel(
     private val _selectedCourse = MutableStateFlow<CourseResponse?>(null)
     val selectedCourse: StateFlow<CourseResponse?> = _selectedCourse.asStateFlow()
 
+    private val _documents = MutableStateFlow<List<DocumentResponse>>(emptyList())
+    val documents: StateFlow<List<DocumentResponse>> = _documents.asStateFlow()
+
+    private val _selectedDocument = MutableStateFlow<DocumentResponse?>(null)
+    val selectedDocument: StateFlow<DocumentResponse?> = _selectedDocument.asStateFlow()
+
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
@@ -44,12 +51,14 @@ class AssistantViewModel(
             repository.getCourses()
                 .onSuccess { list ->
                     _courses.value = list
-                    if (preferredCourseId != null) {
-                        _selectedCourse.value = list.find { it.id == preferredCourseId } ?: list.firstOrNull()
-                    } else if (_selectedCourse.value == null) {
-                        _selectedCourse.value = list.firstOrNull()
+                    val chosen = if (preferredCourseId != null) {
+                        list.find { it.id == preferredCourseId } ?: list.firstOrNull()
+                    } else {
+                        _selectedCourse.value?.let { cur -> list.find { it.id == cur.id } } ?: list.firstOrNull()
                     }
+                    _selectedCourse.value = chosen
                     _coursesLoading.value = false
+                    chosen?.let { loadDocumentsForCourse(it.id) }
                 }
                 .onFailure {
                     _coursesLoading.value = false
@@ -57,8 +66,27 @@ class AssistantViewModel(
         }
     }
 
+    private fun loadDocumentsForCourse(courseId: String) {
+        viewModelScope.launch {
+            repository.getCourseDocuments(courseId)
+                .onSuccess { docs ->
+                    _documents.value = docs.filter { it.status == "ready" }
+                    _selectedDocument.value = null
+                }
+                .onFailure {
+                    _documents.value = emptyList()
+                    _selectedDocument.value = null
+                }
+        }
+    }
+
     fun selectCourse(course: CourseResponse) {
         _selectedCourse.value = course
+        loadDocumentsForCourse(course.id)
+    }
+
+    fun selectDocument(document: DocumentResponse?) {
+        _selectedDocument.value = document
     }
 
     fun askQuestion(questionText: String) {
@@ -75,7 +103,7 @@ class AssistantViewModel(
         _isAsking.value = true
 
         viewModelScope.launch {
-            repository.askAssistant(course.id, null, trimmed)
+            repository.askAssistant(course.id, _selectedDocument.value?.id, trimmed)
                 .onSuccess { res ->
                     val aiMsg = ChatMessage(
                         id = "a-${System.currentTimeMillis()}",

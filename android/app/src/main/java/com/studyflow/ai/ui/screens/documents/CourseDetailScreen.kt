@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.outlined.*
+import kotlinx.coroutines.delay
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +46,7 @@ fun CourseDetailScreen(
     val actionMessage by viewModel.actionMessage.collectAsState()
 
     var showCreateQuizDialog by remember { mutableStateOf(false) }
+    var docToDelete by remember { mutableStateOf<DocumentResponse?>(null) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -55,6 +58,18 @@ fun CourseDetailScreen(
 
     LaunchedEffect(courseId) {
         viewModel.loadCourseDetail(courseId)
+    }
+
+    val hasProcessingDocs = (uiState as? CourseDetailUiState.Success)
+        ?.documents?.any { it.status == "processing" } == true
+
+    LaunchedEffect(courseId, hasProcessingDocs) {
+        if (hasProcessingDocs) {
+            while (true) {
+                delay(3500)
+                viewModel.refreshDocumentsSilently(courseId)
+            }
+        }
     }
 
     Scaffold(
@@ -203,7 +218,7 @@ fun CourseDetailScreen(
                                 items(state.documents, key = { it.id }) { doc ->
                                     DocumentCard(
                                         doc = doc,
-                                        onDeleteClick = { viewModel.deleteDocument(courseId, doc.id) }
+                                        onDeleteClick = { docToDelete = doc }
                                     )
                                 }
                             }
@@ -222,6 +237,30 @@ fun CourseDetailScreen(
                 viewModel.generateQuiz(courseId, topic, count) { quiz ->
                     showCreateQuizDialog = false
                     onStartQuiz(quiz.id)
+                }
+            }
+        )
+    }
+
+    docToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { docToDelete = null },
+            title = { Text("Xóa tài liệu?") },
+            text = { Text("Bạn có chắc muốn xóa tài liệu '${target.title}'? Dữ liệu trích xuất liên quan cũng sẽ bị xóa.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteDocument(courseId, target.id)
+                        docToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Xóa")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { docToDelete = null }) {
+                    Text("Hủy")
                 }
             }
         )
@@ -249,7 +288,7 @@ private fun DocumentCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (doc.mimeType.contains("pdf")) Icons.Outlined.PictureAsPdf else Icons.Outlined.Article,
+                imageVector = if (doc.mimeType.contains("pdf")) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(32.dp)

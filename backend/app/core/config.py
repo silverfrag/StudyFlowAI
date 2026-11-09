@@ -5,7 +5,7 @@ from typing import Optional
 class Settings(BaseSettings):
     APP_NAME: str = "StudyFlow AI Backend"
     APP_ENV: str = "development"
-    DEBUG: bool = True
+    APP_DEBUG: bool = True
     PORT: int = 8000
     HOST: str = "0.0.0.0"
 

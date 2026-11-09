@@ -62,7 +62,7 @@ Mở `.env` và điền `GEMINI_API_KEY` của bạn (lấy tại [Google AI Stu
 ```env
 APP_NAME="StudyFlow AI Backend"
 APP_ENV="development"
-DEBUG=True
+APP_DEBUG=True
 PORT=8000
 HOST="0.0.0.0"
 

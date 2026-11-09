@@ -43,6 +43,12 @@ class StudyFlowRepository {
         Result.failure(Exception(extractError(e)))
     }
 
+    suspend fun updateCourse(courseId: String, name: String, description: String?): Result<CourseResponse> = try {
+        Result.success(api.updateCourse(courseId, CourseCreateRequest(name, description)))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
     suspend fun deleteCourse(courseId: String): Result<Unit> = try {
         val res = api.deleteCourse(courseId)
         if (res.isSuccessful) Result.success(Unit)
@@ -53,6 +59,12 @@ class StudyFlowRepository {
 
     suspend fun getCourseDocuments(courseId: String): Result<List<DocumentResponse>> = try {
         Result.success(api.getCourseDocuments(courseId))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun getDocumentStatus(documentId: String): Result<DocumentStatusResponse> = try {
+        Result.success(api.getDocumentStatus(documentId))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }

@@ -66,13 +66,26 @@ class CourseDetailViewModel(
             try {
                 val contentResolver = context.contentResolver
                 var fileName = "document.pdf"
+                var fileSize = -1L
                 contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
                         val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         if (nameIdx >= 0) fileName = cursor.getString(nameIdx)
+                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIdx >= 0) fileSize = cursor.getLong(sizeIdx)
                     }
                 }
-                val mimeType = contentResolver.getType(uri) ?: "application/pdf"
+                val lowerName = fileName.lowercase()
+                if (!lowerName.endsWith(".pdf") && !lowerName.endsWith(".txt")) {
+                    throw Exception("Chỉ hỗ trợ tải lên tài liệu định dạng .pdf hoặc .txt.")
+                }
+                val maxBytes = 20L * 1024L * 1024L
+                if (fileSize > maxBytes) {
+                    throw Exception("Dung lượng tệp vượt quá giới hạn tối đa 20MB.")
+                }
+
+                val mimeType = contentResolver.getType(uri)
+                    ?: if (lowerName.endsWith(".txt")) "text/plain" else "application/pdf"
                 val stream = contentResolver.openInputStream(uri)
                     ?: throw Exception("Không thể đọc nội dung tệp đã chọn.")
 
@@ -91,6 +104,15 @@ class CourseDetailViewModel(
             } catch (e: Exception) {
                 _isUploading.value = false
                 _actionMessage.value = e.message ?: "Không thể mở tệp."
+            }
+        }
+    }
+
+    fun refreshDocumentsSilently(courseId: String) {
+        val current = _uiState.value as? CourseDetailUiState.Success ?: return
+        viewModelScope.launch {
+            repository.getCourseDocuments(courseId).onSuccess { docs ->
+                _uiState.value = current.copy(documents = docs)
             }
         }
     }

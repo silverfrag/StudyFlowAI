@@ -53,6 +53,12 @@ data class DocumentResponse(
     @SerializedName("created_at") val createdAt: String
 )
 
+data class DocumentStatusResponse(
+    val id: String,
+    val status: String,
+    @SerializedName("error_message") val errorMessage: String? = null
+)
+
 // --- Assistant RAG (UC03) ---
 data class AskRequest(
     @SerializedName("course_id") val courseId: String,

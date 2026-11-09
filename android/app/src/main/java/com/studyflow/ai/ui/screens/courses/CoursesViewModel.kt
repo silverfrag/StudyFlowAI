@@ -62,6 +62,27 @@ class CoursesViewModel(
         }
     }
 
+    fun updateCourse(courseId: String, name: String, description: String?, onSuccess: () -> Unit) {
+        if (name.isBlank()) {
+            _actionError.value = "Tên môn học không được để trống."
+            return
+        }
+        viewModelScope.launch {
+            _isCreating.value = true
+            _actionError.value = null
+            repository.updateCourse(courseId, name.trim(), description?.trim()?.takeIf { it.isNotEmpty() })
+                .onSuccess {
+                    _isCreating.value = false
+                    onSuccess()
+                    loadCourses()
+                }
+                .onFailure { err ->
+                    _isCreating.value = false
+                    _actionError.value = err.message ?: "Không thể cập nhật môn học."
+                }
+        }
+    }
+
     fun deleteCourse(courseId: String) {
         viewModelScope.launch {
             repository.deleteCourse(courseId)

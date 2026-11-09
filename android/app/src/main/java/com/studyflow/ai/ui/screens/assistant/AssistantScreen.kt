@@ -27,12 +27,15 @@ fun AssistantScreen(
 ) {
     val courses by viewModel.courses.collectAsState()
     val selectedCourse by viewModel.selectedCourse.collectAsState()
+    val documents by viewModel.documents.collectAsState()
+    val selectedDocument by viewModel.selectedDocument.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val isAsking by viewModel.isAsking.collectAsState()
     val coursesLoading by viewModel.coursesLoading.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var courseMenuExpanded by remember { mutableStateOf(false) }
+    var docMenuExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(preferredCourseId) {
@@ -93,6 +96,47 @@ fun AssistantScreen(
                                         courseMenuExpanded = false
                                     }
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // Bộ chọn tài liệu tùy chọn (nếu môn có tài liệu đã sẵn sàng)
+                if (documents.isNotEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        ExposedDropdownMenuBox(
+                            expanded = docMenuExpanded,
+                            onExpandedChange = { docMenuExpanded = !docMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                value = selectedDocument?.title ?: "Tất cả tài liệu đã sẵn sàng (${documents.size})",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Tài liệu cụ thể (tùy chọn)") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = docMenuExpanded) },
+                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = docMenuExpanded,
+                                onDismissRequest = { docMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Tất cả tài liệu đã sẵn sàng") },
+                                    onClick = {
+                                        viewModel.selectDocument(null)
+                                        docMenuExpanded = false
+                                    }
+                                )
+                                documents.forEach { doc ->
+                                    DropdownMenuItem(
+                                        text = { Text(doc.title) },
+                                        onClick = {
+                                            viewModel.selectDocument(doc)
+                                            docMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

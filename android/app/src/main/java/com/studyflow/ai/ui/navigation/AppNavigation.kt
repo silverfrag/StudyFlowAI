@@ -2,6 +2,8 @@ package com.studyflow.ai.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,9 +25,9 @@ import com.studyflow.ai.ui.screens.result.ResultScreen
 
 sealed class BottomNavTab(val route: String, val label: String, val icon: ImageVector) {
     data object Home : BottomNavTab("home", "Trang chủ", Icons.Outlined.Home)
-    data object Courses : BottomNavTab("courses", "Môn học", Icons.Outlined.MenuBook)
+    data object Courses : BottomNavTab("courses", "Môn học", Icons.AutoMirrored.Outlined.MenuBook)
     data object Assistant : BottomNavTab("assistant", "AI", Icons.Outlined.SmartToy)
-    data object Progress : BottomNavTab("progress", "Tiến độ", Icons.Outlined.TrendingUp)
+    data object Progress : BottomNavTab("progress", "Tiến độ", Icons.AutoMirrored.Outlined.TrendingUp)
 }
 
 @Composable

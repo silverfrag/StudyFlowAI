@@ -6,7 +6,8 @@ pydantic-settings>=2.6.0
 python-multipart>=0.0.12
 
 # Database & Vector Extension
-sqlalchemy>=2.0.36
+sqlalchemy[asyncio]>=2.0.36
+greenlet>=3.1.0
 asyncpg>=0.30.0
 pgvector>=0.3.6
 psycopg2-binary>=2.9.10

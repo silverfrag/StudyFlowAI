@@ -47,6 +47,9 @@ interface StudyFlowApiService {
         @Part file: MultipartBody.Part
     ): DocumentResponse
 
+    @GET("documents/{documentId}/status")
+    suspend fun getDocumentStatus(@Path("documentId") documentId: String): DocumentStatusResponse
+
     @DELETE("documents/{documentId}")
     suspend fun deleteDocument(@Path("documentId") documentId: String): Response<Unit>
 

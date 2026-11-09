@@ -31,6 +31,7 @@ fun CoursesScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var showCreateDialog by remember { mutableStateOf(false) }
+    var courseToEdit by remember { mutableStateOf<CourseResponse?>(null) }
     var courseToDelete by remember { mutableStateOf<CourseResponse?>(null) }
 
     LaunchedEffect(Unit) {
@@ -102,6 +103,7 @@ fun CoursesScreen(
                                     CourseCard(
                                         course = course,
                                         onClick = { onOpenCourseDetail(course.id) },
+                                        onEditClick = { courseToEdit = course },
                                         onDeleteClick = { courseToDelete = course }
                                     )
                                 }
@@ -115,8 +117,12 @@ fun CoursesScreen(
     }
 
     if (showCreateDialog) {
-        CreateCourseDialog(
-            isCreating = isCreating,
+        CourseFormDialog(
+            title = "Thêm môn học mới",
+            confirmText = "Tạo môn",
+            initialName = "",
+            initialDescription = "",
+            isSaving = isCreating,
             error = actionError,
             onDismiss = {
                 viewModel.clearError()
@@ -125,6 +131,26 @@ fun CoursesScreen(
             onConfirm = { name, desc ->
                 viewModel.createCourse(name, desc) {
                     showCreateDialog = false
+                }
+            }
+        )
+    }
+
+    courseToEdit?.let { editing ->
+        CourseFormDialog(
+            title = "Chỉnh sửa môn học",
+            confirmText = "Lưu thay đổi",
+            initialName = editing.name,
+            initialDescription = editing.description ?: "",
+            isSaving = isCreating,
+            error = actionError,
+            onDismiss = {
+                viewModel.clearError()
+                courseToEdit = null
+            },
+            onConfirm = { name, desc ->
+                viewModel.updateCourse(editing.id, name, desc) {
+                    courseToEdit = null
                 }
             }
         )
@@ -159,6 +185,7 @@ fun CoursesScreen(
 private fun CourseCard(
     course: CourseResponse,
     onClick: () -> Unit,
+    onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     Card(
@@ -181,12 +208,21 @@ private fun CourseCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                IconButton(onClick = onDeleteClick) {
-                    Icon(
-                        imageVector = Icons.Outlined.DeleteOutline,
-                        contentDescription = "Xóa môn học",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row {
+                    IconButton(onClick = onEditClick) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "Chỉnh sửa môn học",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDeleteClick) {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = "Xóa môn học",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -232,18 +268,22 @@ private fun CourseCard(
 }
 
 @Composable
-private fun CreateCourseDialog(
-    isCreating: Boolean,
+private fun CourseFormDialog(
+    title: String,
+    confirmText: String,
+    initialName: String,
+    initialDescription: String,
+    isSaving: Boolean,
     error: String?,
     onDismiss: () -> Unit,
     onConfirm: (String, String?) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var description by remember { mutableStateOf(initialDescription) }
 
     AlertDialog(
-        onDismissRequest = { if (!isCreating) onDismiss() },
-        title = { Text("Thêm môn học mới") },
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -272,17 +312,17 @@ private fun CreateCourseDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirm(name, description) },
-                enabled = !isCreating
+                enabled = !isSaving
             ) {
-                if (isCreating) {
+                if (isSaving) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Tạo môn")
+                    Text(confirmText)
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isCreating) {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
                 Text("Hủy")
             }
         }

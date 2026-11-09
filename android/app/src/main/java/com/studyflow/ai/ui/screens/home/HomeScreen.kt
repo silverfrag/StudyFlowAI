@@ -5,6 +5,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -110,7 +112,7 @@ private fun HomeContent(
                 modifier = Modifier.weight(1f),
                 title = "Môn học",
                 value = summary.totalCourses.toString(),
-                icon = Icons.Outlined.MenuBook,
+                icon = Icons.AutoMirrored.Outlined.MenuBook,
                 onClick = onNavigateToCourses
             )
             StatCard(
@@ -207,7 +209,7 @@ private fun HomeContent(
                 modifier = Modifier.weight(1f),
                 title = "Làm Quiz",
                 subtitle = "Luyện trắc nghiệm",
-                icon = Icons.Outlined.Assignment,
+                icon = Icons.AutoMirrored.Outlined.Assignment,
                 onClick = onNavigateToCourses
             )
         }
