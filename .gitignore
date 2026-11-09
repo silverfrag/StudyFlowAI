@@ -27,6 +27,9 @@ $RECYCLE.BIN/
 /storage/
 /uploads/
 /data/
+/backend/storage/
+/backend/uploads/
+/backend/data/
 *.log
 
 # Python / FastAPI Backend
@@ -47,10 +50,13 @@ build/
 # Android / Kotlin / Gradle
 *.iml
 .gradle/
-/local.properties
+**/local.properties
+local.properties
 .externalNativeBuild/
 .cxx/
 *.apk
 *.aab
+**/build/
 /build/
 /*/build/
+captures/

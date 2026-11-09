@@ -1,0 +1,71 @@
+package com.studyflow.ai.ui.screens.progress
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.studyflow.ai.data.model.ProgressSummaryResponse
+import com.studyflow.ai.data.model.QuizResponse
+import com.studyflow.ai.data.model.RecommendationItem
+import com.studyflow.ai.data.repository.StudyFlowRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+sealed interface ProgressUiState {
+    data object Loading : ProgressUiState
+    data class Success(
+        val summary: ProgressSummaryResponse,
+        val recommendations: List<RecommendationItem>
+    ) : ProgressUiState
+    data class Error(val message: String) : ProgressUiState
+}
+
+class ProgressViewModel(
+    private val repository: StudyFlowRepository = StudyFlowRepository()
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow<ProgressUiState>(ProgressUiState.Loading)
+    val uiState: StateFlow<ProgressUiState> = _uiState.asStateFlow()
+
+    private val _isStartingPractice = MutableStateFlow(false)
+    val isStartingPractice: StateFlow<Boolean> = _isStartingPractice.asStateFlow()
+
+    fun loadProgress() {
+        viewModelScope.launch {
+            _uiState.value = ProgressUiState.Loading
+            val summaryRes = repository.getProgressSummary()
+            val recRes = repository.getRecommendations()
+
+            if (summaryRes.isSuccess && recRes.isSuccess) {
+                _uiState.value = ProgressUiState.Success(
+                    summary = summaryRes.getOrThrow(),
+                    recommendations = recRes.getOrThrow()
+                )
+            } else {
+                val err = summaryRes.exceptionOrNull()?.message
+                    ?: recRes.exceptionOrNull()?.message
+                    ?: "Không thể tải dữ liệu tiến độ."
+                _uiState.value = ProgressUiState.Error(err)
+            }
+        }
+    }
+
+    fun startPracticeQuiz(
+        courseId: String,
+        topic: String,
+        onQuizCreated: (QuizResponse) -> Unit
+    ) {
+        viewModelScope.launch {
+            _isStartingPractice.value = true
+            repository.createQuiz(courseId = courseId, documentId = null, topic = topic, count = 5)
+                .onSuccess { quiz ->
+                    _isStartingPractice.value = false
+                    onQuizCreated(quiz)
+                }
+                .onFailure {
+                    _isStartingPractice.value = false
+                }
+        }
+    }
+}
+
