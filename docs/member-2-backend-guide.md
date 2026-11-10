@@ -71,8 +71,8 @@ STORAGE_DIR="./storage"
 MAX_UPLOAD_SIZE_MB=20
 
 GEMINI_API_KEY="AIzaSy..." # Thay bằng API Key thật của bạn
-GEMINI_MODEL="gemini-1.5-flash"
-GEMINI_EMBEDDING_MODEL="text-embedding-004"
+GEMINI_MODEL="gemini-3.8-flash"
+GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 ```
 
 ### Bước 2.6: Chạy thử Server Backend
@@ -155,7 +155,7 @@ Tạo các bảng với trường dữ liệu chuẩn (sử dụng UUID v4 cho k
    - File TXT: Đọc trực tiếp bằng UTF-8 (xử lý fallback các encoding khác).
    - File PDF: Dùng thư viện `pypdf` để duyệt từng trang, trích xuất text kèm `page_number`.
 4. **Chunking:** Chia nhỏ văn bản thành các đoạn (chunks) khoảng 300 - 500 từ (words) hoặc ~800 ký tự, có độ gối đầu (overlap ~50-100 từ) để không mất ngữ cảnh giữa các đoạn.
-5. **Embeddings:** Gọi model `text-embedding-004` của Gemini để tạo vector 768 chiều cho từng chunk.
+5. **Embeddings:** Gọi model `gemini-embedding-001` (`output_dimensionality=768`) của Gemini để tạo vector 768 chiều cho từng chunk.
 6. **Lưu vào PostgreSQL:** Insert các chunks kèm vector vào bảng `DocumentChunk`.
 7. **Cập nhật trạng thái:** Chuyển `Document.status` từ `"processing"` sang `"ready"` (hoặc `"error"` kèm lý do nếu gặp sự cố).
 
@@ -163,7 +163,7 @@ Tạo các bảng với trường dữ liệu chuẩn (sử dụng UUID v4 cho k
 
 ### Phần 4: Trợ lý RAG có trích dẫn nguồn (`app/services/rag_service.py` & `assistant.py`)
 1. Nhận câu hỏi từ Android: `{ "course_id": "...", "document_id": "...", "question": "..." }`.
-2. Tạo embedding cho câu hỏi với `text-embedding-004`.
+2. Tạo embedding cho câu hỏi với `gemini-embedding-001` (`task_type="RETRIEVAL_QUERY"`).
 3. Tìm kiếm top $k$ chunks có độ tương đồng cosin cao nhất (sử dụng toán tử `<=>` của pgvector: `ORDER BY embedding <=> query_vector LIMIT 4`).
 4. Xây dựng prompt gửi cho Gemini:
    - Truyền nội dung các chunks đã tìm được kèm `chunk_id`, `document_title`, `page_number`.

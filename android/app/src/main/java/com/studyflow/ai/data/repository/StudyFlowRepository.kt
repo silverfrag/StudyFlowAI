@@ -56,7 +56,7 @@ class StudyFlowRepository {
     suspend fun deleteCourse(courseId: String): Result<Unit> = try {
         val res = api.deleteCourse(courseId)
         if (res.isSuccessful) Result.success(Unit)
-        else Result.failure(Exception("Không thể xóa môn học."))
+        else Result.failure(Exception(RetrofitClient.parseError(res.errorBody()?.string())))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }
@@ -80,9 +80,13 @@ class StudyFlowRepository {
         inputStream: InputStream
     ): Result<DocumentResponse> = try {
         val bytes = inputStream.readBytes()
-        val requestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
-        val part = MultipartBody.Part.createFormData("file", fileName, requestBody)
-        Result.success(api.uploadDocument(courseId, part))
+        if (bytes.isEmpty()) {
+            Result.failure(Exception("Tệp tải lên đang trống (0 byte)."))
+        } else {
+            val requestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+            val part = MultipartBody.Part.createFormData("file", fileName, requestBody)
+            Result.success(api.uploadDocument(courseId, part))
+        }
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }
@@ -90,7 +94,7 @@ class StudyFlowRepository {
     suspend fun deleteDocument(documentId: String): Result<Unit> = try {
         val res = api.deleteDocument(documentId)
         if (res.isSuccessful) Result.success(Unit)
-        else Result.failure(Exception("Không thể xóa tài liệu."))
+        else Result.failure(Exception(RetrofitClient.parseError(res.errorBody()?.string())))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }

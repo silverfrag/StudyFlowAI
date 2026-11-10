@@ -82,6 +82,9 @@ class CourseDetailViewModel(
                 if (!lowerName.endsWith(".pdf") && !lowerName.endsWith(".txt")) {
                     throw Exception("Chỉ hỗ trợ tải lên tài liệu định dạng .pdf hoặc .txt.")
                 }
+                if (fileSize == 0L) {
+                    throw Exception("Tệp tải lên đang trống (0 byte).")
+                }
                 val maxBytes = 20L * 1024L * 1024L
                 if (fileSize > maxBytes) {
                     throw Exception("Dung lượng tệp vượt quá giới hạn tối đa 20MB.")
@@ -130,6 +133,7 @@ class CourseDetailViewModel(
 
     fun generateQuiz(
         courseId: String,
+        documentId: String? = null,
         topic: String?,
         questionCount: Int,
         onQuizCreated: (QuizResponse) -> Unit
@@ -139,7 +143,7 @@ class CourseDetailViewModel(
             _quizError.value = null
             repository.createQuiz(
                 courseId = courseId,
-                documentId = null,
+                documentId = documentId,
                 topic = topic?.trim()?.takeIf { it.isNotEmpty() },
                 count = questionCount
             ).onSuccess { quiz ->

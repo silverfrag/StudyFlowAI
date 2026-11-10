@@ -32,7 +32,8 @@ import com.studyflow.ai.ui.theme.WarningAmberBg
 fun ResultScreen(
     result: QuizSubmitResponse?,
     onNavigateToHome: () -> Unit,
-    onNavigateToProgress: () -> Unit
+    onNavigateToProgress: () -> Unit,
+    onNavigateToCourseDetail: (() -> Unit)? = null
 ) {
     Scaffold(
         topBar = {
@@ -192,25 +193,39 @@ fun ResultScreen(
                     QuestionResultCard(item)
                 }
 
-                // Nút điều hướng cuối trang
+                // Nút điều hướng cuối trang (Trang chủ / Chi tiết môn / Tiến độ)
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = onNavigateToHome,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Về Trang chủ")
-                        }
                         Button(
                             onClick = onNavigateToProgress,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("Xem Tiến độ")
+                            Text("Xem Tiến độ & Gợi ý")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onNavigateToHome,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Về Trang chủ")
+                            }
+                            if (onNavigateToCourseDetail != null) {
+                                OutlinedButton(
+                                    onClick = onNavigateToCourseDetail,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Chi tiết môn")
+                                }
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -308,7 +323,8 @@ private fun ResultScreenPreview() {
                 )
             ),
             onNavigateToHome = {},
-            onNavigateToProgress = {}
+            onNavigateToProgress = {},
+            onNavigateToCourseDetail = {}
         )
     }
 }

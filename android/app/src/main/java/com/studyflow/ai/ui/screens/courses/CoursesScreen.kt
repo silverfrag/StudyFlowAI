@@ -12,12 +12,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -332,5 +334,27 @@ private fun CourseFormDialog(
             }
         }
     )
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun CourseCardPreview() {
+    StudyFlowTheme {
+        Box(modifier = Modifier.padding(16.dp)) {
+            CourseCard(
+                course = CourseResponse(
+                    id = "c1",
+                    name = "Cơ sở dữ liệu",
+                    description = "Mô hình quan hệ, SQL và chuẩn hóa dữ liệu",
+                    documentCount = 3,
+                    quizCount = 2,
+                    createdAt = "2026-11-10T07:00:00Z"
+                ),
+                onClick = {},
+                onEditClick = {},
+                onDeleteClick = {}
+            )
+        }
+    }
 }
 

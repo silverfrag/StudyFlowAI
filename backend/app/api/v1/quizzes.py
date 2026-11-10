@@ -3,9 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 from datetime import datetime
+from typing import Dict, Tuple, Optional
 
 from app.core.database import get_db
-from app.models.course import Course
+from app.models.document import Document, DocumentChunk
 from app.models.quiz import Quiz, Question, QuizAttempt, Answer
 from app.schemas.quiz import (
     QuizCreateRequest,
@@ -18,6 +19,8 @@ from app.schemas.quiz import (
     QuestionResultDetail,
     SourceCitation,
 )
+from app.services.gemini_service import AIServiceError
+from app.services.quiz_service import generate_quiz_with_ai
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -25,66 +28,13 @@ router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 @router.post("", response_model=QuizClientResponse, status_code=status.HTTP_201_CREATED)
 async def create_quiz(payload: QuizCreateRequest, db: AsyncSession = Depends(get_db)):
     """Tạo bài kiểm tra MCQ từ tài liệu của môn học (gọi Gemini, BẢO MẬT: giấu đáp án đúng với client)."""
-    course = await db.get(Course, payload.course_id)
-    if not course:
+    try:
+        return await generate_quiz_with_ai(payload=payload, db=db)
+    except AIServiceError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
-        )
-
-    # TODO Thành viên 2:
-    # 1. Lấy chunks liên quan từ document_chunks.
-    # 2. Gọi Gemini để sinh đúng `payload.question_count` câu hỏi trắc nghiệm MCQ (A, B, C, D) có structured JSON.
-    # 3. Lưu Quiz & Questions vào Database (lưu correct_option_id vào bảng Question).
-    # 4. Trả về QuizClientResponse (không chứa correct_option_id).
-
-    # Stub tạo Quiz mẫu để client có thể test luồng làm bài
-    quiz = Quiz(
-        course_id=payload.course_id,
-        title=f"Quiz: {payload.topic or 'Tổng hợp kiến thức môn học'}",
-        total_questions=payload.question_count,
-    )
-    db.add(quiz)
-    await db.commit()
-    await db.refresh(quiz)
-
-    # Tạo câu hỏi mẫu để test
-    questions_response = []
-    for i in range(payload.question_count):
-        q = Question(
-            quiz_id=quiz.id,
-            prompt=f"Câu hỏi trắc nghiệm số {i + 1} về chủ đề: {payload.topic or course.name}?",
-            topic=payload.topic or "Kiến thức chung",
-            options=[
-                {"id": "A", "text": "Phương án lựa chọn A"},
-                {"id": "B", "text": "Phương án lựa chọn B (Đáp án đúng)"},
-                {"id": "C", "text": "Phương án lựa chọn C"},
-                {"id": "D", "text": "Phương án lựa chọn D"},
-            ],
-            correct_option_id="B",
-            explanation=f"Giải thích chi tiết cho câu hỏi số {i + 1}.",
-        )
-        db.add(q)
-        await db.commit()
-        await db.refresh(q)
-
-        questions_response.append(
-            QuizQuestionClientResponse(
-                id=q.id,
-                prompt=q.prompt,
-                topic=q.topic,
-                options=[OptionSchema(**opt) for opt in q.options],
-            )
-        )
-
-    return QuizClientResponse(
-        id=quiz.id,
-        course_id=quiz.course_id,
-        title=quiz.title,
-        total_questions=quiz.total_questions,
-        questions=questions_response,
-        created_at=quiz.created_at,
-    )
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "AI_SERVICE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/{quiz_id}", response_model=QuizClientResponse)
@@ -135,6 +85,18 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
             detail={"code": "VALIDATION_ERROR", "message": "Bài quiz không có câu hỏi nào."},
         )
 
+    # Truy vấn thông tin nguồn thật từ DocumentChunk & Document cho từng câu hỏi
+    chunk_ids = [q.source_chunk_id for q in questions if q.source_chunk_id is not None]
+    citation_map: Dict[UUID, Tuple[str, Optional[int]]] = {}
+    if chunk_ids:
+        cite_res = await db.execute(
+            select(DocumentChunk.id, Document.title, DocumentChunk.page_number)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(DocumentChunk.id.in_(chunk_ids))
+        )
+        for c_id, doc_title, page_num in cite_res.all():
+            citation_map[c_id] = (doc_title, page_num)
+
     # Map submission theo question_id
     answers_map = {ans.question_id: ans.selected_option_id for ans in payload.answers}
 
@@ -156,6 +118,7 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
         if is_correct:
             topic_map[q.topic]["correct"] += 1
 
+        source_info = citation_map.get(q.source_chunk_id) if q.source_chunk_id else None
         details.append(
             QuestionResultDetail(
                 question_id=q.id,
@@ -164,7 +127,11 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
                 correct_option_id=q.correct_option_id,
                 is_correct=is_correct,
                 explanation=q.explanation,
-                citation=SourceCitation(document_title="Tài liệu môn học", page_number=1),
+                citation=(
+                    SourceCitation(document_title=source_info[0], page_number=source_info[1])
+                    if source_info
+                    else None
+                ),
             )
         )
 

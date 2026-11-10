@@ -6,7 +6,7 @@ from typing import List
 from app.core.database import get_db
 from app.models.course import Course
 from app.models.quiz import QuizAttempt, Quiz, Question, Answer
-from app.models.document import Document
+from app.models.document import Document, DocumentChunk
 from app.schemas.progress import (
     ProgressSummaryResponse,
     RecentActivity,
@@ -87,11 +87,28 @@ async def get_recommendations(db: AsyncSession = Depends(get_db)):
                 course = await db.get(Course, course_id)
                 course_name = course.name if course else "Môn học"
 
-                # Tìm tài liệu liên quan đầu tiên của môn
-                doc_res = await db.execute(
-                    select(Document).where(Document.course_id == course_id).limit(1)
+                # Ưu tiên tài liệu 'ready' gắn với các câu hỏi của topic, hoặc tài liệu 'ready' mới nhất của môn
+                linked_doc_res = await db.execute(
+                    select(Document)
+                    .join(DocumentChunk, DocumentChunk.document_id == Document.id)
+                    .join(Question, Question.source_chunk_id == DocumentChunk.id)
+                    .join(Quiz, Question.quiz_id == Quiz.id)
+                    .where(
+                        Quiz.course_id == course_id,
+                        Question.topic == topic,
+                        Document.status == "ready",
+                    )
+                    .limit(1)
                 )
-                first_doc = doc_res.scalar_one_or_none()
+                first_doc = linked_doc_res.scalar_one_or_none()
+                if first_doc is None:
+                    doc_res = await db.execute(
+                        select(Document)
+                        .where(Document.course_id == course_id)
+                        .order_by((Document.status == "ready").desc(), Document.created_at.desc())
+                        .limit(1)
+                    )
+                    first_doc = doc_res.scalar_one_or_none()
 
                 recommendations.append(
                     RecommendationItem(

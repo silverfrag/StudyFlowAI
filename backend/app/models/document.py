@@ -29,6 +29,6 @@ class DocumentChunk(Base):
     text = Column(Text, nullable=False)
     page_number = Column(Integer, nullable=True)
     ordinal = Column(Integer, nullable=False)
-    embedding = Column(Vector(768), nullable=True)  # text-embedding-004: 768 dims
+    embedding = Column(Vector(768), nullable=True)  # gemini-embedding-001 (output_dimensionality=768)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

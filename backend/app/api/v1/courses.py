@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from uuid import UUID
 from typing import List
+import os
 
 from app.core.database import get_db
 from app.models.course import Course
@@ -111,6 +112,17 @@ async def delete_course(course_id: UUID, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
         )
+
+    # Dọn dẹp file vật lý trước khi cascade xóa dữ liệu DB
+    doc_paths_res = await db.execute(select(Document.file_path).where(Document.course_id == course_id))
+    file_paths = [row[0] for row in doc_paths_res.all() if row[0]]
+    for file_path in file_paths:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
     await db.delete(course)
     await db.commit()
     return None

@@ -46,6 +46,7 @@ fun StudyFlowApp() {
 
     // Lưu tạm kết quả Quiz vừa nộp để hiển thị ở màn hình Result
     var latestQuizResult by remember { mutableStateOf<QuizSubmitResponse?>(null) }
+    var latestQuizCourseId by remember { mutableStateOf<String?>(null) }
     var preferredAssistantCourseId by remember { mutableStateOf<String?>(null) }
 
     val showBottomBar = tabs.any { it.route == currentRoute }
@@ -138,7 +139,8 @@ fun StudyFlowApp() {
                     onOpenCourseDetail = { courseId ->
                         navController.navigate("course_detail/$courseId")
                     },
-                    onStartPracticeQuiz = { quizId ->
+                    onStartPracticeQuiz = { quizId, courseId ->
+                        latestQuizCourseId = courseId
                         navController.navigate("quiz/$quizId")
                     },
                     onNavigateToCourses = {
@@ -167,6 +169,7 @@ fun StudyFlowApp() {
                         }
                     },
                     onStartQuiz = { quizId ->
+                        latestQuizCourseId = courseId
                         navController.navigate("quiz/$quizId")
                     }
                 )
@@ -190,6 +193,7 @@ fun StudyFlowApp() {
             }
 
             composable("quiz_result") {
+                val courseIdForBack = latestQuizCourseId
                 ResultScreen(
                     result = latestQuizResult,
                     onNavigateToHome = {
@@ -202,6 +206,14 @@ fun StudyFlowApp() {
                         navController.navigate(BottomNavTab.Progress.route) {
                             popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
                             launchSingleTop = true
+                        }
+                    },
+                    onNavigateToCourseDetail = courseIdForBack?.let { cid ->
+                        {
+                            navController.navigate("course_detail/$cid") {
+                                popUpTo("quiz_result") { inclusive = true }
+                                launchSingleTop = true
+                            }
                         }
                     }
                 )

@@ -4,12 +4,15 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.studyflow.ai.data.api.RetrofitClient
 import com.studyflow.ai.data.model.AnswerSubmission
+import com.studyflow.ai.data.model.AskRequest
 import com.studyflow.ai.data.model.AskResponse
+import com.studyflow.ai.data.model.CourseCreateRequest
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.data.model.DocumentResponse
 import com.studyflow.ai.data.model.DocumentStatusResponse
 import com.studyflow.ai.data.model.HealthResponse
 import com.studyflow.ai.data.model.ProgressSummaryResponse
+import com.studyflow.ai.data.model.QuizCreateRequest
 import com.studyflow.ai.data.model.QuizResponse
 import com.studyflow.ai.data.model.QuizSubmitRequest
 import com.studyflow.ai.data.model.QuizSubmitResponse
@@ -248,5 +251,37 @@ class ApiContractParsingTest {
         assertEquals(1, recs.size)
         assertEquals(0.33, recs[0].accuracy, 0.001)
         assertEquals("Giao_trinh_CSDL_Chuong2_JOIN.pdf", recs[0].suggestedDocument?.title)
+    }
+
+    @Test
+    fun serializeRequestsAndParseErrorFallbacks() {
+        val courseReq = CourseCreateRequest(name = "Hệ điều hành", description = "Tiến trình và bộ nhớ")
+        val courseReqJson = gson.toJson(courseReq)
+        assertTrue(courseReqJson.contains("Hệ điều hành"))
+
+        val askReq = AskRequest(
+            courseId = "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+            documentId = "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+            question = "Khóa chính là gì?"
+        )
+        val askReqJson = gson.toJson(askReq)
+        assertTrue(askReqJson.contains("\"course_id\""))
+        assertTrue(askReqJson.contains("\"document_id\""))
+        assertTrue(askReqJson.contains("\"question\""))
+
+        val quizReq = QuizCreateRequest(
+            courseId = "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+            documentId = null,
+            topic = "SQL",
+            questionCount = 5
+        )
+        val quizReqJson = gson.toJson(quizReq)
+        assertTrue(quizReqJson.contains("\"course_id\""))
+        assertTrue(quizReqJson.contains("\"question_count\":5"))
+
+        val fallbackNull = RetrofitClient.parseError(null)
+        assertTrue(fallbackNull.isNotBlank())
+        val fallbackInvalid = RetrofitClient.parseError("Internal Server Error 500")
+        assertTrue(fallbackInvalid.isNotBlank())
     }
 }

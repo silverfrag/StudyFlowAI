@@ -14,13 +14,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.RecommendationItem
+import com.studyflow.ai.data.model.SuggestedDocument
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
 import com.studyflow.ai.ui.theme.ErrorRed
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 import com.studyflow.ai.ui.theme.WarningAmber
 import com.studyflow.ai.ui.theme.WarningAmberBg
 
@@ -28,7 +31,7 @@ import com.studyflow.ai.ui.theme.WarningAmberBg
 @Composable
 fun ProgressScreen(
     onOpenCourseDetail: (String) -> Unit,
-    onStartPracticeQuiz: (String) -> Unit,
+    onStartPracticeQuiz: (quizId: String, courseId: String) -> Unit,
     onNavigateToCourses: () -> Unit,
     viewModel: ProgressViewModel = viewModel()
 ) {
@@ -184,7 +187,7 @@ fun ProgressScreen(
                                         onOpenCourse = { onOpenCourseDetail(item.courseId) },
                                         onPracticeClick = {
                                             viewModel.startPracticeQuiz(item.courseId, item.topic) { quiz ->
-                                                onStartPracticeQuiz(quiz.id)
+                                                onStartPracticeQuiz(quiz.id, item.courseId)
                                             }
                                         }
                                     )
@@ -286,6 +289,30 @@ private fun RecommendationCard(
                     Text("Luyện quiz")
                 }
             }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecommendationCardPreview() {
+    StudyFlowTheme {
+        Box(modifier = Modifier.padding(16.dp)) {
+            RecommendationCard(
+                item = RecommendationItem(
+                    topic = "Phép JOIN trong quan hệ",
+                    courseId = "c1",
+                    courseName = "Cơ sở dữ liệu",
+                    totalAnswered = 6,
+                    correctCount = 2,
+                    accuracy = 0.33,
+                    recommendedAction = "Ôn lại lý thuyết phép nối và làm quiz luyện tập củng cố.",
+                    suggestedDocument = SuggestedDocument("d1", "Giao_trinh_CSDL_Chuong2.pdf")
+                ),
+                isBusy = false,
+                onOpenCourse = {},
+                onPracticeClick = {}
+            )
         }
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -221,7 +222,7 @@ private fun HomeContent(
             }
         }
 
-        // Truy cập nhanh
+        // Truy cập nhanh: Hỏi AI, Làm quiz, Tài liệu (Màn hình 01)
         Text(
             text = "Truy cập nhanh",
             style = MaterialTheme.typography.titleMedium,
@@ -229,21 +230,37 @@ private fun HomeContent(
         )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Max),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             QuickActionCard(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
                 title = "Hỏi AI",
-                subtitle = "Hỏi đáp theo tài liệu",
+                subtitle = "Hỏi đáp tài liệu",
                 icon = Icons.Outlined.SmartToy,
                 onClick = onNavigateToAssistant
             )
             QuickActionCard(
-                modifier = Modifier.weight(1f),
-                title = "Làm Quiz",
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                title = "Làm quiz",
                 subtitle = "Luyện trắc nghiệm",
                 icon = Icons.AutoMirrored.Outlined.Assignment,
+                onClick = {
+                    val targetCourseId = summary.recentActivity?.courseId
+                    if (targetCourseId != null) {
+                        onOpenCourseDetail(targetCourseId)
+                    } else {
+                        onNavigateToCourses()
+                    }
+                }
+            )
+            QuickActionCard(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                title = "Tài liệu",
+                subtitle = "PDF & TXT",
+                icon = Icons.Outlined.FolderOpen,
                 onClick = onNavigateToCourses
             )
         }
@@ -298,7 +315,7 @@ private fun QuickActionCard(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
@@ -308,12 +325,16 @@ private fun QuickActionCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

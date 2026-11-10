@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.models.course import Course
 from app.models.document import Document
 from app.schemas.document import DocumentResponse, DocumentStatusResponse
+from app.services.document_service import process_document_background
 
 router = APIRouter(tags=["Documents"])
 
@@ -19,6 +20,7 @@ router = APIRouter(tags=["Documents"])
 @router.post("/courses/{course_id}/documents", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     course_id: UUID,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -29,18 +31,25 @@ async def upload_document(
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
         )
 
-    # Validate file extension
-    filename = file.filename or "unknown.pdf"
-    ext = os.path.splitext(filename)[1].lower()
+    # Validate file extension & làm sạch tên file chống path traversal
+    raw_name = os.path.basename(file.filename or "unknown.pdf").strip() or "unknown.pdf"
+    stem, ext_raw = os.path.splitext(raw_name)
+    ext = ext_raw.lower()
     if ext not in [".pdf", ".txt"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "Chỉ hỗ trợ file định dạng .pdf hoặc .txt."},
         )
+    filename = f"{stem[:180]}{ext_raw}"
 
     # Đọc nội dung & kiểm tra dung lượng
     content = await file.read()
     file_size = len(content)
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "VALIDATION_ERROR", "message": "Tệp tải lên đang trống (0 byte).", "field": "file"},
+        )
     max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
     if file_size > max_bytes:
         raise HTTPException(
@@ -70,7 +79,8 @@ async def upload_document(
     await db.commit()
     await db.refresh(doc)
 
-    # TODO Thành viên 2: Kích hoạt background task hoặc service để trích xuất text + chunking + embeddings
+    # Kích hoạt background task trích xuất văn bản, chia chunk và tạo embedding
+    background_tasks.add_task(process_document_background, doc.id)
 
     return DocumentResponse(
         id=doc.id,

@@ -13,10 +13,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.LoadingStateView
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -317,7 +321,8 @@ private fun ChatBubble(
                                         text = "\"${cite.snippet}\"",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -325,6 +330,42 @@ private fun ChatBubble(
                     }
                 }
             }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ChatBubblePreview() {
+    StudyFlowTheme {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ChatBubble(
+                message = ChatMessage(
+                    id = "u1",
+                    isUser = true,
+                    text = "Khóa chính là gì?"
+                )
+            )
+            ChatBubble(
+                message = ChatMessage(
+                    id = "a1",
+                    isUser = false,
+                    text = "Khóa chính (Primary Key) dùng để phân biệt duy nhất mỗi bộ trong quan hệ và không được phép nhận giá trị NULL.",
+                    foundInContext = true,
+                    citations = listOf(
+                        Citation(
+                            documentId = "d1",
+                            documentTitle = "Giao_trinh_CSDL.pdf",
+                            pageNumber = 12,
+                            chunkId = "c1",
+                            snippet = "Khóa chính là thuộc tính có giá trị duy nhất trong quan hệ và không bao giờ được phép mang giá trị rỗng..."
+                        )
+                    )
+                )
+            )
         }
     }
 }

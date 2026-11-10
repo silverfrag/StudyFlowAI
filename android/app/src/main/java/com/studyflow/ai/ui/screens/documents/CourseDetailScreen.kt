@@ -17,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.DocumentResponse
@@ -25,6 +27,7 @@ import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
 import com.studyflow.ai.ui.theme.ErrorRed
 import com.studyflow.ai.ui.theme.ErrorRedBg
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 import com.studyflow.ai.ui.theme.SuccessGreen
 import com.studyflow.ai.ui.theme.SuccessGreenBg
 import com.studyflow.ai.ui.theme.WarningAmber
@@ -100,6 +103,7 @@ fun CourseDetailScreen(
                     viewModel.loadCourseDetail(courseId)
                 }
                 is CourseDetailUiState.Success -> {
+                    val readyCount = state.documents.count { it.status == "ready" }
                     Column(modifier = Modifier.fillMaxSize()) {
                         // Thẻ tổng quan môn + hành động nhanh
                         Card(
@@ -113,8 +117,15 @@ fun CourseDetailScreen(
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
                                 }
+                                Text(
+                                    text = "${state.documents.size} tài liệu ($readyCount sẵn sàng)  •  ${state.course.quizCount} bài quiz",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -219,6 +230,9 @@ fun CourseDetailScreen(
                                 items(state.documents, key = { it.id }) { doc ->
                                     DocumentCard(
                                         doc = doc,
+                                        onRetryUploadClick = {
+                                            filePickerLauncher.launch(arrayOf("application/pdf", "text/plain"))
+                                        },
                                         onDeleteClick = { docToDelete = doc }
                                     )
                                 }
@@ -231,15 +245,20 @@ fun CourseDetailScreen(
     }
 
     if (showCreateQuizDialog) {
+        val readyDocuments = (uiState as? CourseDetailUiState.Success)
+            ?.documents
+            ?.filter { it.status == "ready" }
+            ?: emptyList()
         CreateQuizDialog(
+            readyDocuments = readyDocuments,
             isCreating = isCreatingQuiz,
             error = quizError,
             onDismiss = {
                 viewModel.clearQuizError()
                 showCreateQuizDialog = false
             },
-            onConfirm = { topic, count ->
-                viewModel.generateQuiz(courseId, topic, count) { quiz ->
+            onConfirm = { documentId, topic, count ->
+                viewModel.generateQuiz(courseId, documentId, topic, count) { quiz ->
                     showCreateQuizDialog = false
                     onStartQuiz(quiz.id)
                 }
@@ -275,6 +294,7 @@ fun CourseDetailScreen(
 @Composable
 private fun DocumentCard(
     doc: DocumentResponse,
+    onRetryUploadClick: (() -> Unit)? = null,
     onDeleteClick: () -> Unit
 ) {
     val (statusLabel, statusTextColor, statusBgColor) = when (doc.status) {
@@ -303,7 +323,9 @@ private fun DocumentCard(
                 Text(
                     text = doc.title,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -328,12 +350,21 @@ private fun DocumentCard(
                 }
                 if (doc.status == "error") {
                     val msg = doc.errorMessage?.takeIf { it.isNotBlank() }
-                        ?: "Trích xuất thất bại. Vui lòng xóa và tải lại tệp hợp lệ."
+                        ?: "Trích xuất thất bại. Vui lòng thử tải lại hoặc xóa tệp này."
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = msg,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            if (doc.status == "error" && onRetryUploadClick != null) {
+                IconButton(onClick = onRetryUploadClick) {
+                    Icon(
+                        imageVector = Icons.Outlined.UploadFile,
+                        contentDescription = "Tải lại tài liệu",
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -348,13 +379,17 @@ private fun DocumentCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateQuizDialog(
+    readyDocuments: List<DocumentResponse>,
     isCreating: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onConfirm: (String?, Int) -> Unit
+    onConfirm: (String?, String?, Int) -> Unit
 ) {
+    var selectedDoc by remember(readyDocuments) { mutableStateOf<DocumentResponse?>(null) }
+    var docMenuExpanded by remember { mutableStateOf(false) }
     var topic by remember { mutableStateOf("") }
     var questionCount by remember { mutableFloatStateOf(5f) }
 
@@ -363,6 +398,57 @@ private fun CreateQuizDialog(
         title = { Text("Tạo bài Quiz MCQ") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (readyDocuments.isEmpty()) {
+                    Surface(
+                        color = WarningAmberBg,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Môn học chưa có tài liệu ở trạng thái 'Sẵn sàng'. Hãy tải lên tệp PDF/TXT và chờ xử lý xong.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WarningAmber,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                } else {
+                    ExposedDropdownMenuBox(
+                        expanded = docMenuExpanded,
+                        onExpandedChange = { docMenuExpanded = !docMenuExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedDoc?.title ?: "Tất cả tài liệu đã sẵn sàng (${readyDocuments.size})",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Tài liệu nguồn (tùy chọn)") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = docMenuExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = docMenuExpanded,
+                            onDismissRequest = { docMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Tất cả tài liệu đã sẵn sàng (${readyDocuments.size})") },
+                                onClick = {
+                                    selectedDoc = null
+                                    docMenuExpanded = false
+                                }
+                            )
+                            readyDocuments.forEach { doc ->
+                                DropdownMenuItem(
+                                    text = { Text(doc.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    onClick = {
+                                        selectedDoc = doc
+                                        docMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = topic,
                     onValueChange = { topic = it },
@@ -402,8 +488,8 @@ private fun CreateQuizDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(topic, questionCount.toInt()) },
-                enabled = !isCreating
+                onClick = { onConfirm(selectedDoc?.id, topic, questionCount.toInt()) },
+                enabled = !isCreating && readyDocuments.isNotEmpty()
             ) {
                 if (isCreating) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -418,5 +504,44 @@ private fun CreateQuizDialog(
             }
         }
     )
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun DocumentCardPreview() {
+    StudyFlowTheme {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            DocumentCard(
+                doc = DocumentResponse(
+                    id = "d1",
+                    courseId = "c1",
+                    title = "Giao_trinh_CSDL_Chuong1.pdf",
+                    fileSize = 256000,
+                    mimeType = "application/pdf",
+                    status = "ready",
+                    errorMessage = null,
+                    createdAt = "2026-11-10T07:00:00Z"
+                ),
+                onDeleteClick = {}
+            )
+            DocumentCard(
+                doc = DocumentResponse(
+                    id = "d2",
+                    courseId = "c1",
+                    title = "Bai_giang_loi.pdf",
+                    fileSize = 128000,
+                    mimeType = "application/pdf",
+                    status = "error",
+                    errorMessage = "PDF dạng ảnh scan chưa trích xuất được văn bản.",
+                    createdAt = "2026-11-10T07:05:00Z"
+                ),
+                onRetryUploadClick = {},
+                onDeleteClick = {}
+            )
+        }
+    }
 }
 
