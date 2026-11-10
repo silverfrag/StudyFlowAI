@@ -202,9 +202,30 @@ class StudyFlowRepository {
         courseId: String,
         documentId: String?,
         question: String,
-        history: List<ChatHistoryItem> = emptyList()
+        history: List<ChatHistoryItem> = emptyList(),
+        sessionId: String? = null
     ): Result<AskResponse> = try {
-        Result.success(api.askAssistant(AskRequest(courseId, documentId, question, history)))
+        Result.success(api.askAssistant(AskRequest(courseId, documentId, question, history, sessionId)))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun getCourseAssistantSessions(courseId: String): Result<List<AssistantSessionResponse>> = try {
+        Result.success(api.getCourseAssistantSessions(courseId))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun getAssistantSessionMessages(sessionId: String): Result<List<AssistantMessageResponse>> = try {
+        Result.success(api.getAssistantSessionMessages(sessionId))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun deleteAssistantSession(sessionId: String): Result<Unit> = try {
+        val res = api.deleteAssistantSession(sessionId)
+        if (res.isSuccessful) Result.success(Unit)
+        else Result.failure(Exception(RetrofitClient.parseError(res.errorBody()?.string())))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }

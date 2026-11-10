@@ -55,7 +55,8 @@ Các công cụ này hỗ trợ quá trình xây dựng, không phải thành ph
 2. Backend truy xuất chunks liên quan trong phạm vi được phép, dùng pgvector.
 3. Backend gửi câu hỏi và ngữ cảnh đến Gemini, yêu cầu đầu ra JSON theo schema gồm answer, citations và uncertainty.
 4. Backend parse/validate JSON và xác minh citation chỉ trỏ đến chunk đã truy xuất; trả `document_title`, trang nếu có hoặc `chunk_id`.
-5. Android hiển thị câu trả lời cùng nguồn. Nếu không có căn cứ, nói rõ chưa tìm thấy trong tài liệu; không chấp nhận citation bịa.
+5. Backend quản lý phiên chat tách biệt theo từng `course_id` (`assistant_sessions` + `assistant_messages`), giới hạn lịch sử trong phạm vi tối đa 4 lượt gần nhất cùng phiên và tự ngắt nối ngữ cảnh khi đổi `document_id` để chống trôi ngữ cảnh, đồng thời lưu lượt hỏi/đáp kèm `citations` đã xác thực khi trả `200 OK`.
+6. Android hiển thị danh sách phiên chat thuộc đúng môn học đang chọn để người học tiếp tục chat cũ hoặc tạo chat mới, nạp lại lịch sử kèm nguồn mở thẳng tài liệu (`Mở tr.X`). Nếu không có căn cứ, nói rõ chưa tìm thấy trong tài liệu; không chấp nhận citation bịa.
 
 ### Tạo quiz và chấm điểm
 1. Android yêu cầu quiz theo môn/topic và số câu đã được giới hạn.
@@ -71,7 +72,7 @@ Danh sách dưới đây là phạm vi khái niệm để chia việc; trước 
 
 - `GET/POST/PATCH/DELETE /courses`
 - `GET/POST/DELETE /courses/{courseId}/documents`, `GET /documents/{documentId}/file` & `POST /documents/{documentId}/retry` (upload multipart; trả trạng thái xử lý; tải/stream tệp gốc cho trình xem tài liệu; cho phép thử xử lý lại khi lỗi)
-- `POST /assistant/ask` (question + course/document context → answer + citations)
+- `POST /assistant/ask`, `GET /courses/{courseId}/assistant/sessions`, `GET /assistant/sessions/{sessionId}/messages` & `DELETE /assistant/sessions/{sessionId}` (hỏi đáp RAG theo phiên; liệt kê các phiên chat thuộc group môn học; đọc/xóa lịch sử từng phiên)
 - `GET /courses/{courseId}/quizzes` & `POST /quizzes` (liệt kê quiz theo môn; course/topic/count → validated quiz)
 - `POST /quizzes/{quizId}/submit` (answers → deterministic result)
 - `GET /progress` và `GET /recommendations`
@@ -80,6 +81,8 @@ Danh sách dưới đây là phạm vi khái niệm để chia việc; trước 
 - `Course(id, name, description, created_at)`
 - `Document(id, course_id, title, storage_ref, mime_type, status, created_at)`
 - `DocumentChunk(id, document_id, text, page_number?, ordinal, embedding)`
+- `AssistantSession(id, course_id, document_id?, title, created_at, updated_at)`
+- `AssistantMessage(id, session_id, course_id, document_id?, role, content, found_in_context, citations, created_at)`
 - `Quiz(id, course_id, title, created_at)`
 - `Question(id, quiz_id, prompt, options, correct_option_id, topic, explanation, source_chunk_id?)`
 - `QuizAttempt(id, quiz_id, score, submitted_at)`

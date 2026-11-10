@@ -25,7 +25,7 @@ Tài liệu này xác định hợp đồng giao tiếp giữa **Android Client*
 ## 2. Quy ước ID và Xử lý Lỗi
 
 ### 2.1 Chuẩn hóa ID
-- **Thực thể (Entities):** Toàn bộ ID của các thực thể (`course_id`, `document_id`, `chunk_id`, `quiz_id`, `question_id`, `attempt_id`) bắt buộc dùng định dạng **UUID v4 chuẩn** (chuỗi 36 ký tự: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`).
+- **Thực thể (Entities):** Toàn bộ ID của các thực thể (`course_id`, `document_id`, `chunk_id`, `session_id`, `message_id`, `quiz_id`, `question_id`, `attempt_id`) bắt buộc dùng định dạng **UUID v4 chuẩn** (chuỗi 36 ký tự: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`).
 - **Lựa chọn đáp án (Options):** Dùng chuỗi định danh chữ cái cố định: `"A" | "B" | "C" | "D"`.
 - **Thời gian:** Chuỗi ISO 8601 UTC kết thúc bằng `Z` (ví dụ: `2026-11-08T09:30:00Z`).
 
@@ -221,11 +221,15 @@ Xóa tài liệu và các vector chunks liên quan.
 ### 4.4 Trợ lý học tập AI dẫn nguồn RAG (Assistant - UC03)
 
 #### `POST /api/v1/assistant/ask`
-Hỏi đáp chuyên sâu theo tài liệu đã nạp (hỗ trợ truy vấn lai pgvector + lexical, tổng hợp đa tài liệu và ngữ cảnh hội thoại nối tiếp tùy chọn).
+Hỏi đáp chuyên sâu theo tài liệu đã nạp (hỗ trợ truy vấn lai pgvector + lexical, tổng hợp đa tài liệu và nhiều phiên chat chia group nghiêm ngặt theo từng môn học).
+- Nếu `session_id` là `null` hoặc không truyền (bắt đầu đoạn chat mới), backend tự động tạo một `AssistantSession` mới gắn cứng với `course_id` (tiêu đề lấy gọn từ câu hỏi đầu tiên).
+- Nếu truyền `session_id`, backend kiểm tra phiên chat phải thuộc đúng `course_id` (sai môn trả `400 VALIDATION_ERROR`) và chỉ dùng tối đa 4 lượt gần nhất **trong cùng phiên đó** (tự động ngắt nối ngữ cảnh cũ nếu người dùng đổi phạm vi `document_id` so với lượt trước để chống trôi ngữ cảnh).
+- Chỉ khi trả về `200 OK`, backend mới lưu cặp tin nhắn `user` + `assistant` (kèm `citations`) vào DB.
 - **Request Body:**
 ```json
 {
   "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+  "session_id": null,
   "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
   "question": "Khóa chính là gì và điều kiện của nó?",
   "history": [
@@ -240,11 +244,13 @@ Hỏi đáp chuyên sâu theo tài liệu đã nạp (hỗ trợ truy vấn lai 
   ]
 }
 ```
-*(Nếu muốn hỏi trên toàn bộ tài liệu của môn học, truyền `document_id: null`. Trường `history` là tùy chọn, mặc định `[]`)*
+*(Nếu muốn hỏi trên toàn bộ tài liệu của môn học, truyền `document_id: null`. Trường `session_id` và `history` đều tùy chọn: bỏ trống `session_id` để tạo phiên mới, hoặc truyền `session_id` để nối tiếp phiên cũ cùng môn)*
 
 - **Response:** `200 OK`
 ```json
 {
+  "session_id": "s1111111-1111-4111-8111-111111111111",
+  "session_title": "Khóa chính là gì và điều kiện của nó?",
   "answer": "Khóa chính (Primary Key) là tập hợp một hoặc nhiều thuộc tính dùng để phân biệt duy nhất mỗi bộ trong quan hệ. Điều kiện tiên quyết: không được trùng lặp và tuyệt đối không nhận giá trị NULL.",
   "found_in_context": true,
   "citations": [
@@ -259,6 +265,68 @@ Hỏi đáp chuyên sâu theo tài liệu đã nạp (hỗ trợ truy vấn lai 
 }
 ```
 *Trường hợp không tìm thấy căn cứ:* `found_in_context: false`, `citations: []`, `answer: "Nội dung này chưa được tìm thấy trong tài liệu đã nạp của môn học."`
+
+#### `GET /api/v1/courses/{course_id}/assistant/sessions`
+Lấy danh sách các phiên chat đã lưu thuộc riêng group môn học `course_id` (sắp xếp theo `updated_at` mới nhất trước) để người học tiếp tục đoạn chat cũ hoặc mở phiên mới đúng ngữ cảnh môn.
+- **Query Params:** `limit` (mặc định `50`, tối đa `100`).
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": "s1111111-1111-4111-8111-111111111111",
+    "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+    "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+    "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
+    "title": "Khóa chính là gì và điều kiện của nó?",
+    "message_count": 2,
+    "last_message_preview": "Khóa chính (Primary Key) là tập hợp một hoặc nhiều thuộc tính...",
+    "created_at": "2026-11-10T05:30:00Z",
+    "updated_at": "2026-11-10T05:30:01Z"
+  }
+]
+```
+
+#### `GET /api/v1/assistant/sessions/{session_id}/messages`
+Lấy lịch sử tin nhắn trong một phiên chat theo thứ tự thời gian tăng dần (giới hạn `limit` tin nhắn gần nhất, mặc định `100`, tối đa `200`) để khôi phục giao diện chat kèm nút mở nguồn `Mở tr.X`.
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": "m1111111-1111-4111-8111-111111111111",
+    "session_id": "s1111111-1111-4111-8111-111111111111",
+    "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+    "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+    "role": "user",
+    "content": "Khóa chính là gì và điều kiện của nó?",
+    "found_in_context": true,
+    "citations": [],
+    "created_at": "2026-11-10T05:30:00Z"
+  },
+  {
+    "id": "m2222222-2222-4222-8222-222222222222",
+    "session_id": "s1111111-1111-4111-8111-111111111111",
+    "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+    "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+    "role": "assistant",
+    "content": "Khóa chính (Primary Key) là tập hợp một hoặc nhiều thuộc tính...",
+    "found_in_context": true,
+    "citations": [
+      {
+        "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+        "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
+        "page_number": 12,
+        "chunk_id": "a9c8b765-2222-4333-8444-010203040506",
+        "snippet": "...Khóa chính là thuộc tính có giá trị duy nhất..."
+      }
+    ],
+    "created_at": "2026-11-10T05:30:01Z"
+  }
+]
+```
+
+#### `DELETE /api/v1/assistant/sessions/{session_id}`
+Xóa một phiên chat và toàn bộ tin nhắn bên trong phiên đó (cascade delete).
+- **Response:** `204 No Content`
 
 ---
 

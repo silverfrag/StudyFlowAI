@@ -6,6 +6,8 @@ import com.studyflow.ai.data.api.RetrofitClient
 import com.studyflow.ai.data.model.AnswerSubmission
 import com.studyflow.ai.data.model.AskRequest
 import com.studyflow.ai.data.model.AskResponse
+import com.studyflow.ai.data.model.AssistantMessageResponse
+import com.studyflow.ai.data.model.AssistantSessionResponse
 import com.studyflow.ai.data.model.ChatHistoryItem
 import com.studyflow.ai.data.model.CourseCreateRequest
 import com.studyflow.ai.data.model.CourseResponse
@@ -110,6 +112,8 @@ class ApiContractParsingTest {
     fun parseAskResponseWithAndWithoutContext() {
         val groundedJson = """
             {
+              "session_id": "s1111111-1111-4111-8111-111111111111",
+              "session_title": "Khóa chính là gì?",
               "answer": "Khóa chính dùng để phân biệt duy nhất mỗi bộ.",
               "found_in_context": true,
               "citations": [
@@ -124,6 +128,8 @@ class ApiContractParsingTest {
             }
         """.trimIndent()
         val grounded = gson.fromJson(groundedJson, AskResponse::class.java)
+        assertEquals("s1111111-1111-4111-8111-111111111111", grounded.sessionId)
+        assertEquals("Khóa chính là gì?", grounded.sessionTitle)
         assertTrue(grounded.foundInContext)
         assertEquals(1, grounded.citations.size)
         assertEquals(12, grounded.citations[0].pageNumber)
@@ -138,6 +144,82 @@ class ApiContractParsingTest {
         val missing = gson.fromJson(missingJson, AskResponse::class.java)
         assertFalse(missing.foundInContext)
         assertTrue(missing.citations.isEmpty())
+        assertNull(missing.sessionId)
+    }
+
+    @Test
+    fun parseAssistantSessionsAndMessages() {
+        val sessionsJson = """
+            [
+              {
+                "id": "s1111111-1111-4111-8111-111111111111",
+                "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+                "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+                "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
+                "title": "Khóa chính là gì?",
+                "message_count": 2,
+                "last_message_preview": "Khóa chính dùng để phân biệt duy nhất...",
+                "created_at": "2026-11-10T05:30:00Z",
+                "updated_at": "2026-11-10T05:30:01Z"
+              }
+            ]
+        """.trimIndent()
+        val sessionListType = object : TypeToken<List<AssistantSessionResponse>>() {}.type
+        val sessions: List<AssistantSessionResponse> = gson.fromJson(sessionsJson, sessionListType)
+        assertEquals(1, sessions.size)
+        assertEquals("Giao_trinh_CSDL_Chuong1.pdf", sessions[0].documentTitle)
+        assertEquals(2, sessions[0].messageCount)
+
+        val messagesJson = """
+            [
+              {
+                "id": "m1111111-1111-4111-8111-111111111111",
+                "session_id": "s1111111-1111-4111-8111-111111111111",
+                "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+                "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+                "role": "user",
+                "content": "Khóa chính là gì?",
+                "found_in_context": true,
+                "citations": [],
+                "created_at": "2026-11-10T05:30:00Z"
+              },
+              {
+                "id": "m2222222-2222-4222-8222-222222222222",
+                "session_id": "s1111111-1111-4111-8111-111111111111",
+                "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+                "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+                "role": "assistant",
+                "content": "Khóa chính dùng để phân biệt duy nhất mỗi bộ.",
+                "found_in_context": true,
+                "citations": [
+                  {
+                    "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+                    "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
+                    "page_number": 12,
+                    "chunk_id": "a9c8b765-2222-4333-8444-010203040506",
+                    "snippet": "...Khóa chính..."
+                  }
+                ],
+                "created_at": "2026-11-10T05:30:01Z"
+              }
+            ]
+        """.trimIndent()
+        val msgListType = object : TypeToken<List<AssistantMessageResponse>>() {}.type
+        val messages: List<AssistantMessageResponse> = gson.fromJson(messagesJson, msgListType)
+        assertEquals(2, messages.size)
+        assertEquals("user", messages[0].role)
+        assertEquals("assistant", messages[1].role)
+        assertEquals(1, messages[1].citations.size)
+        assertEquals(12, messages[1].citations[0].pageNumber)
+
+        val askWithSessionReq = AskRequest(
+            courseId = "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+            documentId = null,
+            question = "Tiếp tục câu trước",
+            sessionId = "s1111111-1111-4111-8111-111111111111"
+        )
+        val reqJson = gson.toJson(askWithSessionReq)
+        assertTrue(reqJson.contains("\"session_id\":\"s1111111-1111-4111-8111-111111111111\""))
     }
 
     @Test

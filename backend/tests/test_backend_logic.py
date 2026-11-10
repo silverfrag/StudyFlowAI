@@ -18,7 +18,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal, engine, init_db
 from app.main import app
 from app.models.document import Document, DocumentChunk
 from app.schemas.assistant import ChatHistoryMessage
@@ -275,6 +275,18 @@ class PureBackendUnitTests(unittest.TestCase):
         self.assertIn("    if x > 0:", cleaned)
         self.assertNotIn("\n---\n", cleaned)
 
+        long_q = "   Giải thích chi tiết   sự khác biệt giữa   kiểm thử hộp đen và kiểm thử hộp trắng trong quy trình   "
+        title = rag_service._build_session_title(long_q, max_len=40)
+        self.assertLessEqual(len(title), 43)
+        self.assertTrue(title.endswith("..."))
+        self.assertEqual(rag_service._build_session_title("  Khóa chính là gì?  "), "Khóa chính là gì?")
+
+        md_preview = rag_service._build_plain_preview(
+            "## Tổng quan về **STLC**\n- Gồm `Planning` và Execution.",
+            max_chars=120,
+        )
+        self.assertEqual(md_preview, "Tổng quan về STLC: Gồm Planning và Execution.")
+
     def test_quiz_filler_filtering_helper(self):
         filler_short = DocumentChunk(
             document_id=uuid4(),
@@ -304,6 +316,7 @@ class PureBackendUnitTests(unittest.TestCase):
 class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await engine.dispose()
+        await init_db()
         self.created_course_ids: List[str] = []
         self.tmp_storage = tempfile.TemporaryDirectory()
         self.storage_patch = patch.object(settings, "STORAGE_DIR", self.tmp_storage.name)
@@ -1035,6 +1048,173 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             embedded_query_arg = mock_embed.call_args[0][0][0]
             self.assertIn("STLC", embedded_query_arg)
             self.assertIn("Ngữ cảnh hội thoại gần đây", captured_prompts[-1])
+
+    async def test_multi_session_assistant_history_course_grouping_and_anti_drift(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            c1_res = await client.post("/api/v1/courses", json={"name": "__TEST_CHAT_GRP_1__"})
+            c2_res = await client.post("/api/v1/courses", json={"name": "__TEST_CHAT_GRP_2__"})
+            self.assertEqual(c1_res.status_code, 201, c1_res.text)
+            self.assertEqual(c2_res.status_code, 201, c2_res.text)
+            c1_id = c1_res.json()["id"]
+            c2_id = c2_res.json()["id"]
+            self.created_course_ids.extend([c1_id, c2_id])
+
+            pdf_1a = _build_minimal_pdf_bytes("Equivalence Partitioning splits input domains cleanly.")
+            pdf_1b = _build_minimal_pdf_bytes("Whitebox Statement Coverage guarantees every line executes.")
+            pdf_2 = _build_minimal_pdf_bytes("Normalization 3NF eliminates transitive functional dependencies.")
+
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.15)])):
+                u1a = await client.post(
+                    f"/api/v1/courses/{c1_id}/documents",
+                    files={"file": ("Chuong2_Blackbox.pdf", pdf_1a, "application/pdf")},
+                )
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.65)])):
+                u1b = await client.post(
+                    f"/api/v1/courses/{c1_id}/documents",
+                    files={"file": ("Chuong3_Whitebox.pdf", pdf_1b, "application/pdf")},
+                )
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.85)])):
+                u2 = await client.post(
+                    f"/api/v1/courses/{c2_id}/documents",
+                    files={"file": ("Chuong4_3NF.pdf", pdf_2, "application/pdf")},
+                )
+            self.assertEqual(u1a.status_code, 202, u1a.text)
+            self.assertEqual(u1b.status_code, 202, u1b.text)
+            self.assertEqual(u2.status_code, 202, u2.text)
+            doc1a_id = u1a.json()["id"]
+            doc1b_id = u1b.json()["id"]
+
+            # Lỗi AI (503) tuyệt đối không được tạo phiên rác
+            with patch(
+                "app.services.rag_service.embed_texts",
+                new=AsyncMock(side_effect=gemini_service.AIServiceError("Temporary outage")),
+            ):
+                fail_res = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c1_id, "document_id": doc1a_id, "question": "Lỗi mạng thử nghiệm"},
+                )
+            self.assertEqual(fail_res.status_code, 503)
+            empty_sessions = await client.get(f"/api/v1/courses/{c1_id}/assistant/sessions")
+            self.assertEqual(empty_sessions.status_code, 200)
+            self.assertEqual(empty_sessions.json(), [])
+
+            captured_prompts: List[str] = []
+
+            async def _fake_rag(*, prompt, system_instruction, schema_cls, timeout_seconds=None):
+                captured_prompts.append(prompt)
+                return rag_service._RagLLMOutput(
+                    found_in_context=True,
+                    answer="## Kết quả\n- Phân tích dựa trên **tài liệu** `được chọn` [ĐOẠN 0].",
+                    cited_indices=[0],
+                )
+
+            # Lượt 1 ở C1 (phiên S1a trên doc1a)
+            with patch("app.services.rag_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.15)])), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag)):
+                t1 = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c1_id, "document_id": doc1a_id, "question": "Phân vùng tương đương là gì?"},
+                )
+            self.assertEqual(t1.status_code, 200, t1.text)
+            s1a_id = t1.json()["session_id"]
+            self.assertIsNotNone(s1a_id)
+            self.assertEqual(t1.json()["session_title"], "Phân vùng tương đương là gì?")
+            self.assertEqual(len(t1.json()["citations"]), 1)
+
+            # Không cho phép dùng session của C1 khi chọn course_id = C2
+            cross_course = await client.post(
+                "/api/v1/assistant/ask",
+                json={"course_id": c2_id, "session_id": s1a_id, "question": "Hỏi chéo môn"},
+            )
+            self.assertEqual(cross_course.status_code, 400)
+            self.assertEqual(cross_course.json()["detail"]["code"], "VALIDATION_ERROR")
+
+            # Lượt 2 nối tiếp trên cùng phiên S1a & cùng doc1a -> phải nạp ngữ cảnh từ DB vào prompt
+            with patch("app.services.rag_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.15)])), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag)):
+                t2 = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c1_id, "session_id": s1a_id, "document_id": doc1a_id, "question": "Giải thích chi tiết hơn"},
+                )
+            self.assertEqual(t2.status_code, 200, t2.text)
+            self.assertIn("Ngữ cảnh hội thoại gần đây", captured_prompts[-1])
+            self.assertIn("Phân vùng tương đương là gì?", captured_prompts[-1])
+
+            # Lượt 3 đổi phạm vi sang doc1b trong cùng S1a -> chống trôi ngữ cảnh, không kéo prompt của doc1a
+            mock_embed_switch = AsyncMock(return_value=[_deterministic_vec(0.65)])
+            with patch("app.services.rag_service.embed_texts", new=mock_embed_switch), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag)):
+                t3 = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={
+                        "course_id": c1_id,
+                        "session_id": s1a_id,
+                        "document_id": doc1b_id,
+                        "question": "Giải thích chi tiết hơn",
+                        "history": [{"role": "user", "content": "Phân vùng tương đương là gì?"}],
+                    },
+                )
+            self.assertEqual(t3.status_code, 200, t3.text)
+            self.assertEqual(mock_embed_switch.call_args[0][0][0], "Giải thích chi tiết hơn")
+            self.assertNotIn("Ngữ cảnh hội thoại gần đây", captured_prompts[-1])
+            self.assertEqual(t3.json()["citations"][0]["document_id"], doc1b_id)
+
+            # Tạo thêm phiên chat S1b mới trong C1 & phiên S2 riêng trong C2
+            with patch("app.services.rag_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.15)])), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag)):
+                t_s1b = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c1_id, "document_id": None, "question": "Phiên thứ hai môn KTPM"},
+                )
+            s1b_id = t_s1b.json()["session_id"]
+            self.assertNotEqual(s1b_id, s1a_id)
+
+            with patch("app.services.rag_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.85)])), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag)):
+                t_s2 = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c2_id, "document_id": None, "question": "Chuẩn 3NF là gì?"},
+                )
+            s2_id = t_s2.json()["session_id"]
+
+            # Kiểm tra group theo môn học: C1 chỉ thấy S1b, S1a; C2 chỉ thấy S2
+            c1_sessions_res = await client.get(f"/api/v1/courses/{c1_id}/assistant/sessions")
+            self.assertEqual(c1_sessions_res.status_code, 200)
+            c1_sessions = c1_sessions_res.json()
+            self.assertEqual([s["id"] for s in c1_sessions], [s1b_id, s1a_id])
+            self.assertEqual(c1_sessions[1]["message_count"], 6)
+            self.assertEqual(c1_sessions[1]["document_id"], doc1b_id)
+            self.assertEqual(c1_sessions[1]["document_title"], "Chuong3_Whitebox.pdf")
+            preview = c1_sessions[0]["last_message_preview"] or ""
+            self.assertTrue(preview.startswith("Kết quả: Phân tích"))
+            self.assertNotIn("##", preview)
+            self.assertNotIn("**", preview)
+            self.assertNotIn("`", preview)
+
+            c2_sessions_res = await client.get(f"/api/v1/courses/{c2_id}/assistant/sessions")
+            self.assertEqual(c2_sessions_res.status_code, 200)
+            self.assertEqual([s["id"] for s in c2_sessions_res.json()], [s2_id])
+
+            # Kiểm tra thứ tự tin nhắn & citations trong S1a
+            msgs_res = await client.get(f"/api/v1/assistant/sessions/{s1a_id}/messages")
+            self.assertEqual(msgs_res.status_code, 200)
+            msgs = msgs_res.json()
+            self.assertEqual(len(msgs), 6)
+            self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user", "assistant", "user", "assistant"])
+            self.assertEqual(msgs[0]["content"], "Phân vùng tương đương là gì?")
+            self.assertEqual(len(msgs[1]["citations"]), 1)
+            self.assertTrue(msgs[0]["created_at"].endswith("Z"))
+
+            # Xóa riêng S1b -> không ảnh hưởng S1a
+            del_s1b = await client.delete(f"/api/v1/assistant/sessions/{s1b_id}")
+            self.assertEqual(del_s1b.status_code, 204)
+            after_del_msgs = await client.get(f"/api/v1/assistant/sessions/{s1b_id}/messages")
+            self.assertEqual(after_del_msgs.status_code, 404)
+            remaining_c1 = await client.get(f"/api/v1/courses/{c1_id}/assistant/sessions")
+            self.assertEqual([s["id"] for s in remaining_c1.json()], [s1a_id])
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import logging
 import re
 import unicodedata
@@ -6,12 +7,19 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.assistant import AssistantMessage, AssistantSession
 from app.models.course import Course
 from app.models.document import Document, DocumentChunk
-from app.schemas.assistant import AskResponse, ChatHistoryMessage, Citation
+from app.schemas.assistant import (
+    AskResponse,
+    AssistantMessageResponse,
+    AssistantSessionResponse,
+    ChatHistoryMessage,
+    Citation,
+)
 from app.services.document_service import EMBEDDING_DIMENSIONS
 from app.services.gemini_service import embed_texts, generate_structured_json
 
@@ -283,6 +291,32 @@ def _build_snippet(text: str, max_chars: int = MAX_SNIPPET_CHARS) -> str:
         return cleaned
     truncated = cleaned[:max_chars].rsplit(" ", 1)[0].strip()
     return f"{truncated or cleaned[:max_chars]}..."
+
+
+def _build_plain_preview(text: str, max_chars: int = 120) -> str:
+    """Chuyển markdown câu trả lời thành đoạn preview văn bản thuần gọn gàng cho danh sách phiên chat."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    cleaned_lines: List[str] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s or re.fullmatch(r"[-*_`]{3,}", s):
+            continue
+        is_heading = bool(re.match(r"^#{1,6}\s+", s))
+        s = re.sub(r"^#{1,6}\s+", "", s)
+        s = re.sub(r"^[-*+]\s+", "", s)
+        s = re.sub(r"\*\*([^*]+?)\*\*", r"\1", s)
+        s = re.sub(r"__([^_]+?)__", r"\1", s)
+        s = s.replace("`", "")
+        s = re.sub(r"\s+", " ", s).strip()
+        if not s:
+            continue
+        if is_heading and s[-1] not in ".!?:;…":
+            s = f"{s}:"
+        cleaned_lines.append(s)
+    plain = " ".join(cleaned_lines)
+    return _build_snippet(plain or raw, max_chars)
 
 
 def _pack_chunks_within_budget(
@@ -615,14 +649,231 @@ async def _retrieve_hybrid_focused_chunks(
     return _pack_chunks_within_budget(assembled)
 
 
+def _build_session_title(question: str, max_len: int = 72) -> str:
+    cleaned = re.sub(r"\s+", " ", (question or "").strip())
+    if len(cleaned) <= max_len:
+        return cleaned or "Đoạn chat mới"
+    truncated = cleaned[:max_len].rsplit(" ", 1)[0].strip()
+    return f"{truncated or cleaned[:max_len]}..."
+
+
+async def _load_recent_session_history(
+    session_id: UUID,
+    expected_document_id: Optional[UUID],
+    db: AsyncSession,
+    max_messages: int = 4,
+) -> List[ChatHistoryMessage]:
+    stmt = (
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == session_id)
+        .order_by(AssistantMessage.created_at.desc(), AssistantMessage.id.desc())
+        .limit(12)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    contiguous_same_scope: List[ChatHistoryMessage] = []
+    for msg in rows:
+        if msg.document_id != expected_document_id:
+            break
+        role = "user" if msg.role == "user" else "assistant"
+        content = (msg.content or "").strip()
+        if not content:
+            continue
+        contiguous_same_scope.append(ChatHistoryMessage(role=role, content=content[:2000]))
+        if len(contiguous_same_scope) >= max_messages:
+            break
+    contiguous_same_scope.reverse()
+    return contiguous_same_scope
+
+
+async def _persist_assistant_turn(
+    db: AsyncSession,
+    course_id: UUID,
+    document_id: Optional[UUID],
+    question: str,
+    response: AskResponse,
+    existing_session: Optional[AssistantSession] = None,
+) -> AskResponse:
+    user_ts = datetime.utcnow()
+    ai_ts = user_ts + timedelta(microseconds=10)
+
+    if existing_session is None:
+        session_obj = AssistantSession(
+            course_id=course_id,
+            document_id=document_id,
+            title=_build_session_title(question),
+            created_at=user_ts,
+            updated_at=ai_ts,
+        )
+        db.add(session_obj)
+        await db.flush()
+    else:
+        session_obj = existing_session
+        session_obj.document_id = document_id
+        session_obj.updated_at = ai_ts
+
+    user_msg = AssistantMessage(
+        session_id=session_obj.id,
+        course_id=course_id,
+        document_id=document_id,
+        role="user",
+        content=question,
+        found_in_context=True,
+        citations=[],
+        created_at=user_ts,
+    )
+    ai_msg = AssistantMessage(
+        session_id=session_obj.id,
+        course_id=course_id,
+        document_id=document_id,
+        role="assistant",
+        content=response.answer,
+        found_in_context=response.found_in_context,
+        citations=[c.model_dump(mode="json") for c in response.citations],
+        created_at=ai_ts,
+    )
+    db.add(user_msg)
+    db.add(ai_msg)
+    await db.commit()
+
+    response.session_id = session_obj.id
+    response.session_title = session_obj.title
+    return response
+
+
+async def list_course_assistant_sessions(
+    course_id: UUID,
+    db: AsyncSession,
+    limit: int = 50,
+) -> List[AssistantSessionResponse]:
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
+        )
+
+    sess_stmt = (
+        select(AssistantSession)
+        .where(AssistantSession.course_id == course_id)
+        .order_by(AssistantSession.updated_at.desc(), AssistantSession.created_at.desc())
+        .limit(limit)
+    )
+    sessions = list((await db.execute(sess_stmt)).scalars().all())
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+    count_rows = (
+        await db.execute(
+            select(AssistantMessage.session_id, func.count(AssistantMessage.id))
+            .where(AssistantMessage.session_id.in_(session_ids))
+            .group_by(AssistantMessage.session_id)
+        )
+    ).all()
+    count_map: Dict[UUID, int] = {sid: int(cnt) for sid, cnt in count_rows}
+
+    last_msg_rows = (
+        await db.execute(
+            select(AssistantMessage.session_id, AssistantMessage.content)
+            .where(AssistantMessage.session_id.in_(session_ids))
+            .distinct(AssistantMessage.session_id)
+            .order_by(
+                AssistantMessage.session_id,
+                AssistantMessage.created_at.desc(),
+                AssistantMessage.id.desc(),
+            )
+        )
+    ).all()
+    preview_map: Dict[UUID, str] = {sid: _build_plain_preview(content, 120) for sid, content in last_msg_rows if content}
+
+    doc_ids = list({s.document_id for s in sessions if s.document_id is not None})
+    doc_title_map: Dict[UUID, str] = {}
+    if doc_ids:
+        doc_rows = (await db.execute(select(Document.id, Document.title).where(Document.id.in_(doc_ids)))).all()
+        doc_title_map = {did: dtitle for did, dtitle in doc_rows}
+
+    return [
+        AssistantSessionResponse(
+            id=s.id,
+            course_id=s.course_id,
+            document_id=s.document_id,
+            document_title=doc_title_map.get(s.document_id) if s.document_id else None,
+            title=s.title,
+            message_count=count_map.get(s.id, 0),
+            last_message_preview=preview_map.get(s.id),
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in sessions
+    ]
+
+
+async def list_session_messages(
+    session_id: UUID,
+    db: AsyncSession,
+    limit: int = 100,
+) -> List[AssistantMessageResponse]:
+    session_obj = await db.get(AssistantSession, session_id)
+    if not session_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy phiên chat."},
+        )
+
+    stmt = (
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == session_id)
+        .order_by(AssistantMessage.created_at.desc(), AssistantMessage.id.desc())
+        .limit(limit)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    rows.reverse()
+
+    items: List[AssistantMessageResponse] = []
+    for msg in rows:
+        parsed_citations: List[Citation] = []
+        for raw_cite in msg.citations or []:
+            if isinstance(raw_cite, dict):
+                try:
+                    parsed_citations.append(Citation.model_validate(raw_cite))
+                except Exception:
+                    continue
+        items.append(
+            AssistantMessageResponse(
+                id=msg.id,
+                session_id=msg.session_id,
+                course_id=msg.course_id,
+                document_id=msg.document_id,
+                role="user" if msg.role == "user" else "assistant",
+                content=msg.content,
+                found_in_context=msg.found_in_context,
+                citations=parsed_citations,
+                created_at=msg.created_at,
+            )
+        )
+    return items
+
+
+async def delete_assistant_session(session_id: UUID, db: AsyncSession) -> None:
+    session_obj = await db.get(AssistantSession, session_id)
+    if not session_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy phiên chat."},
+        )
+    await db.delete(session_obj)
+    await db.commit()
+
+
 async def ask_question_rag(
     course_id: UUID,
     document_id: Optional[UUID],
     question: str,
     db: AsyncSession,
     history: Optional[Sequence[ChatHistoryMessage]] = None,
+    session_id: Optional[UUID] = None,
 ) -> AskResponse:
-    """Truy vấn lai (pgvector + lexical + mở rộng ngữ cảnh slide) và sinh câu trả lời RAG chuyên sâu."""
+    """Truy vấn lai (pgvector + lexical + mở rộng ngữ cảnh slide), chống trôi ngữ cảnh và lưu phiên chat theo môn."""
     cleaned_question = question.strip()
     if len(cleaned_question) < 2:
         raise HTTPException(
@@ -636,6 +887,24 @@ async def ask_question_rag(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
         )
+
+    existing_session: Optional[AssistantSession] = None
+    if session_id is not None:
+        existing_session = await db.get(AssistantSession, session_id)
+        if not existing_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy phiên chat."},
+            )
+        if existing_session.course_id != course_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": "Phiên chat không thuộc môn học đã chọn.",
+                    "field": "session_id",
+                },
+            )
 
     if document_id is not None:
         doc = await db.get(Document, document_id)
@@ -656,6 +925,8 @@ async def ask_question_rag(
         if doc.status != "ready":
             status_vi = "đang xử lý" if doc.status == "processing" else "bị lỗi"
             return AskResponse(
+                session_id=existing_session.id if existing_session else None,
+                session_title=existing_session.title if existing_session else None,
                 answer=f"Tài liệu '{doc.title}' hiện {status_vi}, chưa sẵn sàng để tra cứu.",
                 found_in_context=False,
                 citations=[],
@@ -676,6 +947,8 @@ async def ask_question_rag(
     has_chunk_res = await db.execute(has_chunk_stmt.limit(1))
     if has_chunk_res.scalar_one_or_none() is None:
         return AskResponse(
+            session_id=existing_session.id if existing_session else None,
+            session_title=existing_session.title if existing_session else None,
             answer="Môn học này chưa có tài liệu nào ở trạng thái sẵn sàng để tra cứu. Hãy tải tệp PDF hoặc TXT lên và chờ xử lý xong.",
             found_in_context=False,
             citations=[],
@@ -689,7 +962,26 @@ async def ask_question_rag(
         key=lambda d: _natural_sort_key(d.title),
     )
 
-    retrieval_query = _build_retrieval_query(cleaned_question, history)
+    # Chống trôi ngữ cảnh:
+    # - Nếu tiếp tục phiên cũ nhưng đổi phạm vi document_id so với lượt trước của phiên, ngắt nối ngữ cảnh cũ.
+    # - Nếu tiếp tục cùng phạm vi trong phiên đã lưu, ưu tiên tối đa 4 tin nhắn liên tiếp cùng phạm vi từ DB.
+    if existing_session is not None:
+        doc_scope_switched = existing_session.document_id != document_id
+        if doc_scope_switched:
+            effective_history: List[ChatHistoryMessage] = []
+        else:
+            effective_history = await _load_recent_session_history(
+                session_id=existing_session.id,
+                expected_document_id=document_id,
+                db=db,
+                max_messages=4,
+            )
+            if not effective_history and history:
+                effective_history = list(history)[-4:]
+    else:
+        effective_history = list(history)[-4:] if history else []
+
+    retrieval_query = _build_retrieval_query(cleaned_question, effective_history)
     # Luôn nhúng câu hỏi thành vector 768 chiều để hỗ trợ truy vấn ngữ nghĩa & kiểm soát lỗi AI nhất quán
     query_vectors = await embed_texts(
         [retrieval_query],
@@ -724,10 +1016,17 @@ async def ask_question_rag(
         )
 
     if not retrieved_rows:
-        return AskResponse(
-            answer="Nội dung này chưa được tìm thấy trong tài liệu đã nạp của môn học.",
-            found_in_context=False,
-            citations=[],
+        return await _persist_assistant_turn(
+            db=db,
+            course_id=course_id,
+            document_id=document_id,
+            question=cleaned_question,
+            response=AskResponse(
+                answer="Nội dung này chưa được tìm thấy trong tài liệu đã nạp của môn học.",
+                found_in_context=False,
+                citations=[],
+            ),
+            existing_session=existing_session,
         )
 
     context_blocks = []
@@ -737,9 +1036,9 @@ async def ask_question_rag(
 
     doc_names_summary = ", ".join(d.title for d in ready_docs[:10])
     history_block = ""
-    if history:
+    if effective_history:
         recent_turns = []
-        for turn in list(history)[-4:]:
+        for turn in effective_history[-4:]:
             role_vi = "Sinh viên" if turn.role == "user" else "Trợ lý AI"
             snippet = re.sub(r"\s+", " ", turn.content.strip())[:360]
             recent_turns.append(f"- {role_vi}: {snippet}")
@@ -768,10 +1067,17 @@ async def ask_question_rag(
 
     if not llm_output.found_in_context:
         fallback_msg = "Nội dung này chưa được tìm thấy trong tài liệu đã nạp của môn học."
-        return AskResponse(
-            answer=llm_output.answer.strip() or fallback_msg,
-            found_in_context=False,
-            citations=[],
+        return await _persist_assistant_turn(
+            db=db,
+            course_id=course_id,
+            document_id=document_id,
+            question=cleaned_question,
+            response=AskResponse(
+                answer=llm_output.answer.strip() or fallback_msg,
+                found_in_context=False,
+                citations=[],
+            ),
+            existing_session=existing_session,
         )
 
     # Xác thực chặt chẽ các chỉ số trích dẫn để không bao giờ bịa citation
@@ -794,15 +1100,29 @@ async def ask_question_rag(
             )
 
     if not verified_citations:
-        return AskResponse(
-            answer="Nội dung này chưa được tìm thấy căn cứ rõ ràng trong tài liệu đã nạp của môn học.",
-            found_in_context=False,
-            citations=[],
+        return await _persist_assistant_turn(
+            db=db,
+            course_id=course_id,
+            document_id=document_id,
+            question=cleaned_question,
+            response=AskResponse(
+                answer="Nội dung này chưa được tìm thấy căn cứ rõ ràng trong tài liệu đã nạp của môn học.",
+                found_in_context=False,
+                citations=[],
+            ),
+            existing_session=existing_session,
         )
 
     cleaned_answer = _clean_rag_answer(llm_output.answer) or llm_output.answer.strip()
-    return AskResponse(
-        answer=cleaned_answer,
-        found_in_context=True,
-        citations=verified_citations,
+    return await _persist_assistant_turn(
+        db=db,
+        course_id=course_id,
+        document_id=document_id,
+        question=cleaned_question,
+        response=AskResponse(
+            answer=cleaned_answer,
+            found_in_context=True,
+            citations=verified_citations,
+        ),
+        existing_session=existing_session,
     )

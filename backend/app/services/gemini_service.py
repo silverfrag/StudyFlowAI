@@ -309,7 +309,7 @@ async def generate_structured_json(
     for idx, model in enumerate(candidates):
         has_fallback = idx < len(candidates) - 1
         per_attempt_timeout = (
-            min(base_timeout, 18.0)
+            min(base_timeout, 24.0)
             if has_fallback
             else base_timeout
         )

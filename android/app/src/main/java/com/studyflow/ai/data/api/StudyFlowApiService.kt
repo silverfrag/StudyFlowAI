@@ -65,6 +65,21 @@ interface StudyFlowApiService {
     @POST("assistant/ask")
     suspend fun askAssistant(@Body request: AskRequest): AskResponse
 
+    @GET("courses/{courseId}/assistant/sessions")
+    suspend fun getCourseAssistantSessions(
+        @Path("courseId") courseId: String,
+        @Query("limit") limit: Int = 50
+    ): List<AssistantSessionResponse>
+
+    @GET("assistant/sessions/{sessionId}/messages")
+    suspend fun getAssistantSessionMessages(
+        @Path("sessionId") sessionId: String,
+        @Query("limit") limit: Int = 100
+    ): List<AssistantMessageResponse>
+
+    @DELETE("assistant/sessions/{sessionId}")
+    suspend fun deleteAssistantSession(@Path("sessionId") sessionId: String): Response<Unit>
+
     // --- Quizzes (UC04, UC05, UC06) ---
     @GET("courses/{courseId}/quizzes")
     suspend fun getCourseQuizzes(@Path("courseId") courseId: String): List<QuizSummaryResponse>

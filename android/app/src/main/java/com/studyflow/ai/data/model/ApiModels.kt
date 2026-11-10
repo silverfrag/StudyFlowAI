@@ -69,7 +69,8 @@ data class AskRequest(
     @SerializedName("course_id") val courseId: String,
     @SerializedName("document_id") val documentId: String? = null,
     val question: String,
-    val history: List<ChatHistoryItem> = emptyList()
+    val history: List<ChatHistoryItem> = emptyList(),
+    @SerializedName("session_id") val sessionId: String? = null
 )
 
 data class Citation(
@@ -81,9 +82,35 @@ data class Citation(
 )
 
 data class AskResponse(
+    @SerializedName("session_id") val sessionId: String? = null,
+    @SerializedName("session_title") val sessionTitle: String? = null,
     val answer: String,
     @SerializedName("found_in_context") val foundInContext: Boolean,
     val citations: List<Citation> = emptyList()
+)
+
+data class AssistantSessionResponse(
+    val id: String,
+    @SerializedName("course_id") val courseId: String,
+    @SerializedName("document_id") val documentId: String? = null,
+    @SerializedName("document_title") val documentTitle: String? = null,
+    val title: String,
+    @SerializedName("message_count") val messageCount: Int = 0,
+    @SerializedName("last_message_preview") val lastMessagePreview: String? = null,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String
+)
+
+data class AssistantMessageResponse(
+    val id: String,
+    @SerializedName("session_id") val sessionId: String,
+    @SerializedName("course_id") val courseId: String,
+    @SerializedName("document_id") val documentId: String? = null,
+    val role: String, // "user" | "assistant"
+    val content: String,
+    @SerializedName("found_in_context") val foundInContext: Boolean = true,
+    val citations: List<Citation> = emptyList(),
+    @SerializedName("created_at") val createdAt: String
 )
 
 // --- Quizzes (UC04, UC05, UC06) ---

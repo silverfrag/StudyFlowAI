@@ -29,6 +29,8 @@ async def get_db():
 
 async def init_db():
     """Khởi tạo database extension pgvector và các bảng nếu chưa có."""
+    import app.models  # noqa: F401 - Đảm bảo toàn bộ ORM models đã đăng ký vào Base.metadata
+
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         await conn.run_sync(Base.metadata.create_all)
