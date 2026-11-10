@@ -188,6 +188,7 @@ class ApiContractParsingTest {
                 { "topic": "Ràng buộc toàn vẹn", "total_questions": 1, "correct_count": 1, "accuracy": 1.0 },
                 { "topic": "Khóa chính", "total_questions": 1, "correct_count": 0, "accuracy": 0.0 }
               ],
+              "study_advice": "Bạn vừa nhầm ở Khóa chính và Ràng buộc tham chiếu. Xem lại Giao_trinh_CSDL_Chuong1.pdf (Trang 20).",
               "details": [
                 {
                   "question_id": "e3333333-3333-4333-8333-333333333333",
@@ -204,6 +205,8 @@ class ApiContractParsingTest {
         val submitRes = gson.fromJson(submitResJson, QuizSubmitResponse::class.java)
         assertEquals(3.3, submitRes.score, 0.001)
         assertEquals(1, submitRes.correctCount)
+        assertNotNull(submitRes.studyAdvice)
+        assertTrue(submitRes.studyAdvice!!.contains("Trang 20"))
         assertNull(submitRes.details[0].selectedOptionId)
         assertEquals("B", submitRes.details[0].correctOptionId)
         assertNotNull(submitRes.details[0].citation)

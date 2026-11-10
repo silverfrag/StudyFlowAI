@@ -297,19 +297,21 @@ async def generate_structured_json(
     prompt: str,
     system_instruction: str,
     schema_cls: Type[T],
+    timeout_seconds: Optional[float] = None,
 ) -> T:
     """Gọi Gemini Interactions API ép đầu ra JSON theo schema và validate bằng Pydantic (kèm fallback khi chậm)."""
     client = get_genai_client()
     candidates = resolve_generation_candidates()
     json_schema = inline_json_schema(schema_cls.model_json_schema())
 
+    base_timeout = float(timeout_seconds) if timeout_seconds is not None else float(settings.GEMINI_TIMEOUT_SECONDS)
     last_error_message = "Dịch vụ Gemini AI hiện không khả dụng hoặc hết hạn mức."
     for idx, model in enumerate(candidates):
         has_fallback = idx < len(candidates) - 1
         per_attempt_timeout = (
-            min(float(settings.GEMINI_TIMEOUT_SECONDS), 18.0)
+            min(base_timeout, 18.0)
             if has_fallback
-            else float(settings.GEMINI_TIMEOUT_SECONDS)
+            else base_timeout
         )
         try:
             interaction = await asyncio.wait_for(

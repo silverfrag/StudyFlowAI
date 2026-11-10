@@ -85,5 +85,6 @@ class QuizSubmitResponse(BaseModel):
     incorrect_count: int
     submitted_at: UtcDatetime
     topic_stats: List[TopicStat]
+    study_advice: Optional[str] = None
     details: List[QuestionResultDetail]
 

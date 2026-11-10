@@ -195,7 +195,7 @@ fun ProgressScreen(
                                             )
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "Tất cả các chủ đề bạn đã làm (>= 3 câu) đều đạt trên 60%, hoặc bạn cần làm thêm câu hỏi để đủ dữ liệu đánh giá.",
+                                                text = "Tất cả các chủ đề bạn đã làm (>= 2 câu) đều đạt từ 60% trở lên, hoặc bạn cần làm thêm câu hỏi ở cùng chủ đề để đủ dữ liệu đánh giá.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -264,7 +264,7 @@ private fun RecommendationCard(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        text = "$percent% đúng",
+                        text = "$percent% (${item.correctCount}/${item.totalAnswered})",
                         color = semanticColors.warning,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,

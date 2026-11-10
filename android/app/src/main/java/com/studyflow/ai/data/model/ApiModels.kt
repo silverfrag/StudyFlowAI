@@ -159,6 +159,7 @@ data class QuizSubmitResponse(
     @SerializedName("incorrect_count") val incorrectCount: Int,
     @SerializedName("submitted_at") val submittedAt: String,
     @SerializedName("topic_stats") val topicStats: List<TopicStat>,
+    @SerializedName("study_advice") val studyAdvice: String? = null,
     val details: List<QuestionResultDetail>
 )
 

@@ -1,18 +1,18 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, Integer
 from typing import List
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.course import Course
-from app.models.quiz import QuizAttempt, Quiz, Question, Answer
-from app.models.document import Document, DocumentChunk
+from app.models.quiz import Quiz, QuizAttempt
 from app.schemas.progress import (
     ProgressSummaryResponse,
     RecentActivity,
     RecommendationItem,
-    SuggestedDocument,
 )
+from app.services.recommendation_service import build_recommendations
 
 router = APIRouter(tags=["Progress"])
 
@@ -57,74 +57,5 @@ async def get_progress_summary(db: AsyncSession = Depends(get_db)):
 
 @router.get("/recommendations", response_model=List[RecommendationItem])
 async def get_recommendations(db: AsyncSession = Depends(get_db)):
-    """Gợi ý ôn tập theo Topic yếu (Ngưỡng đề xuất: accuracy < 0.60 và số câu làm >= 3)."""
-    # Lấy thống kê theo topic từ các answers
-    query = (
-        select(
-            Question.topic,
-            Quiz.course_id,
-            func.count(Answer.id).label("total_answered"),
-            func.sum(func.cast(Answer.is_correct, Integer)).label("correct_count"),
-        )
-        .join(Question, Answer.question_id == Question.id)
-        .join(Quiz, Question.quiz_id == Quiz.id)
-        .group_by(Question.topic, Quiz.course_id)
-    )
-    result = await db.execute(query)
-    rows = result.all()
-
-    recommendations = []
-    for row in rows:
-        topic = row.topic
-        course_id = row.course_id
-        total_answered = row.total_answered or 0
-        correct_count = row.correct_count or 0
-
-        # Áp dụng ngưỡng: total >= 3 và accuracy < 0.60
-        if total_answered >= 3:
-            accuracy = round(float(correct_count) / float(total_answered), 2)
-            if accuracy < 0.60:
-                course = await db.get(Course, course_id)
-                course_name = course.name if course else "Môn học"
-
-                # Ưu tiên tài liệu 'ready' gắn với các câu hỏi của topic, hoặc tài liệu 'ready' mới nhất của môn
-                linked_doc_res = await db.execute(
-                    select(Document)
-                    .join(DocumentChunk, DocumentChunk.document_id == Document.id)
-                    .join(Question, Question.source_chunk_id == DocumentChunk.id)
-                    .join(Quiz, Question.quiz_id == Quiz.id)
-                    .where(
-                        Quiz.course_id == course_id,
-                        Question.topic == topic,
-                        Document.status == "ready",
-                    )
-                    .limit(1)
-                )
-                first_doc = linked_doc_res.scalar_one_or_none()
-                if first_doc is None:
-                    doc_res = await db.execute(
-                        select(Document)
-                        .where(Document.course_id == course_id)
-                        .order_by((Document.status == "ready").desc(), Document.created_at.desc())
-                        .limit(1)
-                    )
-                    first_doc = doc_res.scalar_one_or_none()
-
-                recommendations.append(
-                    RecommendationItem(
-                        topic=topic,
-                        course_id=course_id,
-                        course_name=course_name,
-                        total_answered=total_answered,
-                        correct_count=correct_count,
-                        accuracy=accuracy,
-                        recommended_action=f"Xem lại tài liệu liên quan đến chủ đề '{topic}' và làm bài quiz luyện tập củng cố.",
-                        suggested_document=(
-                            SuggestedDocument(id=first_doc.id, title=first_doc.title)
-                            if first_doc
-                            else None
-                        ),
-                    )
-                )
-
-    return recommendations
+    """Gợi ý ôn tập theo Topic yếu (Ngưỡng đề xuất: accuracy < 0.60 và số câu làm >= 2)."""
+    return await build_recommendations(db)

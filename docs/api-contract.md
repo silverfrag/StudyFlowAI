@@ -81,7 +81,7 @@ Mặc định FastAPI trả về lỗi validation Pydantic với format mảng t
 > 3. **Giới hạn số câu hỏi Quiz (Quiz Question Range):**
 >    - *Phương án đề xuất:* Mỗi bài quiz được sinh có từ **3 đến 10 câu hỏi** (mặc định khuyến nghị: 5 câu).
 > 4. **Ngưỡng xác định Topic yếu (Weak Topic Threshold):**
->    - *Phương án đề xuất:* Một topic được coi là yếu khi tỷ lệ đúng `accuracy < 0.60` (dưới 60%) VÀ người học đã làm tối thiểu `>= 3` câu hỏi thuộc topic đó.
+>    - Một topic được coi là yếu khi tỷ lệ đúng `accuracy < 0.60` (dưới 60%) VÀ người học đã làm tối thiểu `>= 2` câu hỏi thuộc topic đó (sau khi chuẩn hóa định dạng tên chủ đề để tránh bị chia vụn do dấu câu).
 
 ---
 
@@ -400,6 +400,7 @@ Người học trả lời:
       "accuracy": 0.0
     }
   ],
+  "study_advice": "Bạn vừa nhầm ở Khóa chính và Ràng buộc tham chiếu (phân biệt composite key và khóa ngoại liên kết bảng). Hãy đọc lại 'Giao_trinh_CSDL_Chuong1.pdf' (Trang 15, 20) trước khi làm lại.",
   "details": [
     {
       "question_id": "e1111111-1111-4111-8111-111111111111",
@@ -464,8 +465,8 @@ Lấy tổng quan tiến độ học tập cho Màn hình 01 (Trang chủ).
 ```
 
 #### `GET /api/v1/recommendations`
-Lấy danh sách topic yếu và gợi ý học tập cho Màn hình 06 / Màn hình Tiến độ.
-- *[Đề xuất — Chờ nhóm thống nhất: Ngưỡng topic yếu accuracy < 0.60 và số câu làm >= 3]*
+Lấy danh sách topic yếu (sắp xếp tỷ lệ đúng thấp nhất trước) và gợi ý học tập cá nhân hóa cho Màn hình 06 / Màn hình Tiến độ.
+- **Quy tắc xác định topic yếu:** `accuracy < 0.60` và số câu đã trả lời `total_answered >= 2` (sau khi chuẩn hóa tên topic). Logic chọn topic hoàn toàn xác định từ lịch sử DB; backend dùng Gemini (kèm fallback sát dữ liệu/trang tài liệu khi AI bận) để diễn đạt `recommended_action` cụ thể, không khuôn mẫu theo UC07.
 - **Response:** `200 OK`
 ```json
 [
@@ -476,7 +477,7 @@ Lấy danh sách topic yếu và gợi ý học tập cho Màn hình 06 / Màn h
     "total_answered": 6,
     "correct_count": 2,
     "accuracy": 0.33,
-    "recommended_action": "Ôn lại lý thuyết phép nối (INNER, LEFT, RIGHT JOIN) và làm quiz luyện tập bổ sung.",
+    "recommended_action": "Bạn còn nhầm điều kiện ghép bản ghi của LEFT JOIN và INNER JOIN (đúng 2/6 câu). Hãy xem lại 'Giao_trinh_CSDL_Chuong2_JOIN.pdf' (Trang 8) rồi luyện quiz củng cố.",
     "suggested_document": {
       "id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
       "title": "Giao_trinh_CSDL_Chuong2_JOIN.pdf"
@@ -484,4 +485,4 @@ Lấy danh sách topic yếu và gợi ý học tập cho Màn hình 06 / Màn h
   }
 ]
 ```
-*(Nếu chưa có topic nào thỏa mãn ngưỡng tối thiểu >= 3 câu, API trả về mảng rỗng `[]` để UI hiển thị empty state khuyến khích người học làm thêm quiz).*
+*(Nếu chưa có topic nào thỏa mãn ngưỡng tối thiểu >= 2 câu và < 60%, API trả về mảng rỗng `[]` để UI hiển thị empty state khuyến khích người học làm thêm quiz).*

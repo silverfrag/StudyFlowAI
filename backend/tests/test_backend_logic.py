@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,13 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.main import app
 from app.models.document import Document
-from app.services import document_service, gemini_service, quiz_service, rag_service
+from app.services import (
+    document_service,
+    gemini_service,
+    quiz_service,
+    rag_service,
+    recommendation_service,
+)
 
 
 def _build_minimal_pdf_bytes(text: str = "Primary Key is unique and NOT NULL in relational databases.") -> bytes:
@@ -148,6 +155,79 @@ class PureBackendUnitTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             quiz_service._validate_and_normalize_questions(valid, expected_count=3, fallback_topic="CSDL")
+
+        # Kiểm tra preferred_topic giữ nhất quán tên topic & gộp các topic đơn lẻ khi > 3 chủ đề
+        fragmented = quiz_service._QuizLLMOutput(
+            questions=[
+                quiz_service._QuizQuestionLLM(
+                    prompt=f"Câu {i}",
+                    topic=t,
+                    options=[
+                        quiz_service._QuizOptionLLM(id="A", text="1"),
+                        quiz_service._QuizOptionLLM(id="B", text="2"),
+                        quiz_service._QuizOptionLLM(id="C", text="3"),
+                        quiz_service._QuizOptionLLM(id="D", text="4"),
+                    ],
+                    correct_option_id="A",
+                    explanation="Giải thích.",
+                    source_chunk_index=0,
+                )
+                for i, t in enumerate(["STLC", "STLC", "Black-box", "DevTools", "Locator", "PageObject"])
+            ]
+        )
+        locked = quiz_service._validate_and_normalize_questions(
+            fragmented,
+            expected_count=6,
+            fallback_topic="Kiểm thử",
+            preferred_topic="  Vòng đời lỗi (Bug Lifecycle)  ",
+        )
+        self.assertEqual({q["topic"] for q in locked}, {"Vòng đời lỗi (Bug Lifecycle)"})
+
+        grouped = quiz_service._validate_and_normalize_questions(
+            fragmented,
+            expected_count=6,
+            fallback_topic="Kiểm thử",
+            existing_topic_map={"stlc": "Quy trình kiểm thử (STLC)"},
+        )
+        distinct_topics = {q["topic"] for q in grouped}
+        self.assertLessEqual(len(distinct_topics), 3)
+        self.assertIn("Quy trình kiểm thử (STLC)", distinct_topics)
+
+    def test_topic_normalization_and_contextual_fallback(self):
+        k1 = recommendation_service.normalize_topic_group_key("Quy trình kiểm thử (STLC)")
+        k2 = recommendation_service.normalize_topic_group_key("  quy trình kiểm thử   STLC ")
+        self.assertEqual(k1, k2)
+
+        cand = recommendation_service._WeakTopicCandidate(
+            course_id=UUID("00000000-0000-0000-0000-000000000001"),
+            course_name="Kiểm thử phần mềm",
+            topic="Vòng đời của lỗi",
+            total_answered=2,
+            correct_count=0,
+            accuracy=0.0,
+            wrong_evidences=[
+                recommendation_service._WrongEvidence(
+                    question_id=UUID("00000000-0000-0000-0000-000000000002"),
+                    prompt="Trạng thái nào xuất hiện sau khi Dev sửa lỗi xong?",
+                    explanation="Sau Fixed cần chuyển Retest/Verified để QA kiểm chứng lại trước khi Closed.",
+                    document_id=UUID("00000000-0000-0000-0000-000000000003"),
+                    document_title="Chuong2_STLC.pdf",
+                    document_status="ready",
+                    page_number=36,
+                )
+            ],
+            suggested_doc=recommendation_service.SuggestedDocument(
+                id=UUID("00000000-0000-0000-0000-000000000003"),
+                title="Chuong2_STLC.pdf",
+            ),
+            pages=[36],
+            cache_key=("test",),
+        )
+        msg = recommendation_service._build_contextual_fallback_action(cand, variant_idx=0)
+        self.assertNotIn("Xem lại tài liệu liên quan đến chủ đề", msg)
+        self.assertIn("Trang 36", msg)
+        self.assertIn("Chuong2_STLC.pdf", msg)
+        self.assertIn("Retest/Verified", msg)
 
 
 class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -383,21 +463,29 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("correct_option_id", q)
 
             # Nộp bài: Q1 đúng (B), Q2 sai (C), Q3 bỏ trống (omitted) -> 1/3 đúng => score 3.3
+            recommendation_service._RECOMMENDATION_CACHE.clear()
+            recommendation_service._QUIZ_ADVICE_CACHE.clear()
             q_ids = [q["id"] for q in quiz_body["questions"]]
-            submit_res = await client.post(
-                f"/api/v1/quizzes/{quiz_id}/submit",
-                json={
-                    "answers": [
-                        {"question_id": q_ids[0], "selected_option_id": "B"},
-                        {"question_id": q_ids[1], "selected_option_id": "C"},
-                    ]
-                },
-            )
+            with patch(
+                "app.services.recommendation_service.generate_structured_json",
+                new=AsyncMock(side_effect=gemini_service.AIServiceError("Offline mode fallback check")),
+            ):
+                submit_res = await client.post(
+                    f"/api/v1/quizzes/{quiz_id}/submit",
+                    json={
+                        "answers": [
+                            {"question_id": q_ids[0], "selected_option_id": "B"},
+                            {"question_id": q_ids[1], "selected_option_id": "C"},
+                        ]
+                    },
+                )
             self.assertEqual(submit_res.status_code, 200, submit_res.text)
             submit_body = submit_res.json()
             self.assertEqual(submit_body["score"], 3.3)
             self.assertEqual(submit_body["correct_count"], 1)
             self.assertEqual(submit_body["incorrect_count"], 2)
+            self.assertIsNotNone(submit_body["study_advice"])
+            self.assertIn("Chuong1_CSDL.pdf", submit_body["study_advice"])
             self.assertEqual(submit_body["details"][0]["citation"]["document_title"], "Chuong1_CSDL.pdf")
             self.assertEqual(submit_body["details"][0]["citation"]["page_number"], 1)
             self.assertIsNone(submit_body["details"][2]["selected_option_id"])
@@ -408,8 +496,24 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(list_quiz_after.json()[0]["attempt_count"], 1)
             self.assertEqual(list_quiz_after.json()[0]["latest_score"], 3.3)
 
-            # 7. Kiểm tra recommendations phát hiện topic yếu (>= 3 câu & < 60%)
-            rec_res = await client.get("/api/v1/recommendations")
+            # 7. Kiểm tra recommendations phát hiện topic yếu (>= 2 câu & < 60%) và dùng lời khuyên LLM khi khả dụng
+            async def _fake_rec_llm(*, prompt, system_instruction, schema_cls, timeout_seconds=None):
+                indices = [int(m.group(1)) for m in re.finditer(r"\[CHỦ ĐỀ (\d+)\]", prompt)]
+                return recommendation_service._RecommendationAdviceBatchOutput(
+                    items=[
+                        recommendation_service._TopicAdviceLLM(
+                            topic_index=i,
+                            advice=f"Gợi ý cá nhân hóa #{i}: xem kỹ trang nguồn và làm thêm 5 câu luyện tập.",
+                        )
+                        for i in indices
+                    ]
+                )
+
+            with patch(
+                "app.services.recommendation_service.generate_structured_json",
+                new=AsyncMock(side_effect=_fake_rec_llm),
+            ), patch("app.services.recommendation_service.is_gemini_configured", return_value=True):
+                rec_res = await client.get("/api/v1/recommendations")
             self.assertEqual(rec_res.status_code, 200, rec_res.text)
             weak_items = [r for r in rec_res.json() if r["topic"] == "__TEST_WEAK_TOPIC__"]
             self.assertEqual(len(weak_items), 1)
@@ -417,6 +521,7 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(weak_items[0]["correct_count"], 1)
             self.assertAlmostEqual(weak_items[0]["accuracy"], 0.33, places=2)
             self.assertEqual(weak_items[0]["suggested_document"]["id"], doc_id)
+            self.assertIn("Gợi ý cá nhân hóa", weak_items[0]["recommended_action"])
 
             # 8. Xóa môn học -> phải xóa cả file vật lý trong storage
             del_res = await client.delete(f"/api/v1/courses/{course_id}")
@@ -608,6 +713,164 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await db.refresh(db_doc)
                 self.assertEqual(db_doc.status, "error")
                 self.assertIn("gián đoạn", db_doc.error_message or "")
+
+    async def test_recommendations_threshold_sorting_normalization_and_fallback(self):
+        recommendation_service._RECOMMENDATION_CACHE.clear()
+        recommendation_service._QUIZ_ADVICE_CACHE.clear()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            c_res = await client.post("/api/v1/courses", json={"name": "__TEST_REC_LOGIC__"})
+            self.assertEqual(c_res.status_code, 201, c_res.text)
+            c_id = c_res.json()["id"]
+            self.created_course_ids.append(c_id)
+
+            pdf_bytes = _build_minimal_pdf_bytes("Black-box testing and Bug Lifecycle notes.")
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.4)])):
+                up_res = await client.post(
+                    f"/api/v1/courses/{c_id}/documents",
+                    files={"file": ("Chuong2_Test.pdf", pdf_bytes, "application/pdf")},
+                )
+            self.assertEqual(up_res.status_code, 202, up_res.text)
+            doc_id = up_res.json()["id"]
+
+            def _q(prompt: str, topic: str, explanation: str):
+                return quiz_service._QuizQuestionLLM(
+                    prompt=prompt,
+                    topic=topic,
+                    options=[
+                        quiz_service._QuizOptionLLM(id="A", text="Đáp án A"),
+                        quiz_service._QuizOptionLLM(id="B", text="Đáp án B"),
+                        quiz_service._QuizOptionLLM(id="C", text="Đáp án C"),
+                        quiz_service._QuizOptionLLM(id="D", text="Đáp án D"),
+                    ],
+                    correct_option_id="A",
+                    explanation=explanation,
+                    source_chunk_index=0,
+                )
+
+            # Quiz 1 (5 câu, 3 nhóm topic -> không vượt giới hạn 3 nhóm):
+            # - __REC_ZERO__ (0/2 -> 0%), __REC_VARIANT__ (1/2 -> 50%, gộp biến thể dấu ngoặc), __REC_SINGLE__ (0/1 -> bị loại do < 2 câu)
+            mock_quiz_1 = quiz_service._QuizLLMOutput(
+                questions=[
+                    _q("Zero 1", "__REC_ZERO__", "Bug chuyển Retest sau khi sửa."),
+                    _q("Zero 2", "__REC_ZERO__", "Closed khi QA xác nhận hết lỗi."),
+                    _q("Var 1", "__REC_VARIANT__ (Alpha)", "Phân vùng tương đương giảm số ca test."),
+                    _q("Var 2", "__REC_VARIANT__ Alpha", "Giá trị biên tập trung tại ngưỡng min/max."),
+                    _q("Single 1", "__REC_SINGLE__", "Chỉ làm 1 câu chưa đủ ngưỡng thống kê."),
+                ]
+            )
+            with patch("app.services.quiz_service.generate_structured_json", new=AsyncMock(return_value=mock_quiz_1)):
+                q1_res = await client.post(
+                    "/api/v1/quizzes",
+                    json={"course_id": c_id, "document_id": doc_id, "question_count": 5},
+                )
+            self.assertEqual(q1_res.status_code, 201, q1_res.text)
+            q1_ids = [q["id"] for q in q1_res.json()["questions"]]
+
+            # Submit Quiz 1 với Gemini fallback lỗi -> vẫn phải 200 OK và có study_advice sát thực tế
+            with patch(
+                "app.services.recommendation_service.generate_structured_json",
+                new=AsyncMock(side_effect=gemini_service.AIServiceError("Simulated 429")),
+            ), patch("app.services.recommendation_service.is_gemini_configured", return_value=True):
+                sub1_res = await client.post(
+                    f"/api/v1/quizzes/{q1_res.json()['id']}/submit",
+                    json={
+                        "answers": [
+                            {"question_id": q1_ids[0], "selected_option_id": "B"},  # Zero 1: sai
+                            {"question_id": q1_ids[1], "selected_option_id": "B"},  # Zero 2: sai (0/2)
+                            {"question_id": q1_ids[2], "selected_option_id": "A"},  # Var 1: đúng
+                            {"question_id": q1_ids[3], "selected_option_id": "B"},  # Var 2: sai (1/2)
+                            {"question_id": q1_ids[4], "selected_option_id": "B"},  # Single: sai (0/1)
+                        ]
+                    },
+                )
+            self.assertEqual(sub1_res.status_code, 200, sub1_res.text)
+            sub1_body = sub1_res.json()
+            self.assertIn("Chuong2_Test.pdf", sub1_body["study_advice"])
+            # topic_stats trong kết quả phải gộp __REC_VARIANT__ (Alpha) và __REC_VARIANT__ Alpha
+            variant_stats = [t for t in sub1_body["topic_stats"] if "__REC_VARIANT__" in t["topic"]]
+            self.assertEqual(len(variant_stats), 1)
+            self.assertEqual(variant_stats[0]["total_questions"], 2)
+
+            # Quiz 2 (3 câu __REC_PASS__, đạt 2/3 -> 67% >= 60% -> phải bị loại khỏi recommendations)
+            mock_quiz_2 = quiz_service._QuizLLMOutput(
+                questions=[
+                    _q("Pass 1", "__REC_PASS__", "Đạt 1."),
+                    _q("Pass 2", "__REC_PASS__", "Đạt 2."),
+                    _q("Pass 3", "__REC_PASS__", "Sai 3."),
+                ]
+            )
+            with patch("app.services.quiz_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.4)])), \
+                 patch("app.services.quiz_service.generate_structured_json", new=AsyncMock(return_value=mock_quiz_2)):
+                q2_res = await client.post(
+                    "/api/v1/quizzes",
+                    json={"course_id": c_id, "document_id": doc_id, "topic": "__REC_PASS__", "question_count": 3},
+                )
+            self.assertEqual(q2_res.status_code, 201, q2_res.text)
+            q2_ids = [q["id"] for q in q2_res.json()["questions"]]
+            with patch(
+                "app.services.recommendation_service.generate_structured_json",
+                new=AsyncMock(side_effect=gemini_service.AIServiceError("Simulated 429")),
+            ), patch("app.services.recommendation_service.is_gemini_configured", return_value=True):
+                sub2_res = await client.post(
+                    f"/api/v1/quizzes/{q2_res.json()['id']}/submit",
+                    json={
+                        "answers": [
+                            {"question_id": q2_ids[0], "selected_option_id": "A"},
+                            {"question_id": q2_ids[1], "selected_option_id": "A"},
+                            {"question_id": q2_ids[2], "selected_option_id": "B"},
+                        ]
+                    },
+                )
+            self.assertEqual(sub2_res.status_code, 200, sub2_res.text)
+
+            # Kiểm tra GET /recommendations ở chế độ fallback (LLM lỗi):
+            # - Chỉ trả __REC_ZERO__ (0.0) rồi tới __REC_VARIANT__ (0.5)
+            # - Loại __REC_SINGLE__ (< 2 câu) và __REC_PASS__ (>= 60%)
+            with patch(
+                "app.services.recommendation_service.generate_structured_json",
+                new=AsyncMock(side_effect=gemini_service.AIServiceError("Simulated 429")),
+            ), patch("app.services.recommendation_service.is_gemini_configured", return_value=True):
+                rec_fallback = await client.get("/api/v1/recommendations")
+            self.assertEqual(rec_fallback.status_code, 200, rec_fallback.text)
+            scoped = [r for r in rec_fallback.json() if r["course_id"] == c_id]
+            self.assertEqual(len(scoped), 2)
+            self.assertEqual(scoped[0]["topic"], "__REC_ZERO__")
+            self.assertAlmostEqual(scoped[0]["accuracy"], 0.0, places=2)
+            self.assertIn("__REC_VARIANT__", scoped[1]["topic"])
+            self.assertAlmostEqual(scoped[1]["accuracy"], 0.5, places=2)
+            for item in scoped:
+                self.assertNotIn("Xem lại tài liệu liên quan đến chủ đề", item["recommended_action"])
+                self.assertIn("Chuong2_Test.pdf", item["recommended_action"])
+                self.assertIn("Trang 1", item["recommended_action"])
+
+            # Kiểm tra cache + Gemini wording khi LLM hoạt động
+            async def _fake_rec_llm(*, prompt, system_instruction, schema_cls, timeout_seconds=None):
+                indices = [int(m.group(1)) for m in re.finditer(r"\[CHỦ ĐỀ (\d+)\]", prompt)]
+                return recommendation_service._RecommendationAdviceBatchOutput(
+                    items=[
+                        recommendation_service._TopicAdviceLLM(
+                            topic_index=i,
+                            advice=f"Lời khuyên AI #{i}: đọc lại phần giải thích và Trang 1 tài liệu Chuong2_Test.pdf.",
+                        )
+                        for i in indices
+                    ]
+                )
+
+            recommendation_service._RECOMMENDATION_CACHE.clear()
+            mock_llm = AsyncMock(side_effect=_fake_rec_llm)
+            with patch("app.services.recommendation_service.generate_structured_json", new=mock_llm), \
+                 patch("app.services.recommendation_service.is_gemini_configured", return_value=True):
+                r1 = await client.get("/api/v1/recommendations")
+                r2 = await client.get("/api/v1/recommendations")
+            self.assertEqual(r1.status_code, 200)
+            self.assertEqual(r2.status_code, 200)
+            self.assertEqual(mock_llm.await_count, 1)  # Lần gọi thứ 2 phải dùng cache, không gọi lại LLM
+            scoped_llm = [r for r in r1.json() if r["course_id"] == c_id]
+            self.assertEqual(len(scoped_llm), 2)
+            self.assertIn("Lời khuyên AI", scoped_llm[0]["recommended_action"])
 
 
 if __name__ == "__main__":

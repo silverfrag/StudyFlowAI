@@ -120,7 +120,7 @@ fun ResultScreen(
                                             modifier = Modifier.padding(end = 8.dp)
                                         ) {
                                             Text(
-                                                text = "Cần ôn tập",
+                                                text = if (stat.totalQuestions >= 2) "Cần ôn tập" else "Chưa đạt",
                                                 color = semanticColors.warning,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
@@ -144,37 +144,84 @@ fun ResultScreen(
                             }
                         }
                     }
+                }
 
-                    val weakTopics = result.topicStats.filter { it.accuracy < 0.60 }
-                    if (weakTopics.isNotEmpty()) {
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = semanticColors.warningContainer,
-                                    contentColor = semanticColors.onWarningContainer
+                // Gợi ý ôn tập bám sát câu sai và nguồn tài liệu
+                val weakTopics = result.topicStats.filter { it.accuracy < 0.60 }
+                val adviceText = result.studyAdvice?.takeIf { it.isNotBlank() } ?: when {
+                    result.incorrectCount == 0 ->
+                        "Bạn đã hoàn thành chính xác toàn bộ ${result.totalQuestions} câu hỏi. Có thể chuyển sang chủ đề tiếp theo hoặc tăng độ khó."
+                    weakTopics.isNotEmpty() -> {
+                        val missedRefs = result.details
+                            .filter { !it.isCorrect }
+                            .mapNotNull { d ->
+                                d.citation?.let { cite ->
+                                    cite.pageNumber?.let { p -> "${cite.documentTitle} (Trang $p)" } ?: cite.documentTitle
+                                }
+                            }
+                            .distinct()
+                            .take(2)
+                        val refHint = if (missedRefs.isNotEmpty()) {
+                            " Đọc lại ${missedRefs.joinToString(", ")} trước khi luyện tiếp."
+                        } else {
+                            " Xem phần giải thích chi tiết bên dưới để nắm chắc lý do sai."
+                        }
+                        "Trọng tâm cần xem lại: ${weakTopics.joinToString(", ") { it.topic }}.$refHint"
+                    }
+                    else -> null
+                }
+
+                if (adviceText != null) {
+                    val hasMistakes = result.incorrectCount > 0
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (hasMistakes) {
+                                    semanticColors.warningContainer
+                                } else {
+                                    semanticColors.successContainer
+                                },
+                                contentColor = if (hasMistakes) {
+                                    semanticColors.onWarningContainer
+                                } else {
+                                    semanticColors.onSuccessContainer
+                                }
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(
+                                    text = if (hasMistakes) "Gợi ý ôn tập" else "Nhận xét học tập",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (hasMistakes) semanticColors.warning else semanticColors.success
                                 )
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(
-                                        text = "Gợi ý ôn tập",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = semanticColors.warning
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Bạn đạt dưới 60% ở: ${weakTopics.joinToString(", ") { it.topic }}. Mở Tiến độ để xem tài liệu và làm quiz củng cố.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = semanticColors.onWarningContainer
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = adviceText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (hasMistakes) {
+                                        semanticColors.onWarningContainer
+                                    } else {
+                                        semanticColors.onSuccessContainer
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     FilledTonalButton(
                                         onClick = onNavigateToProgress,
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Text("Xem gợi ý ôn tập")
+                                        Text("Mở Tiến độ & Luyện tập")
+                                    }
+                                    if (hasMistakes && onNavigateToCourseDetail != null) {
+                                        OutlinedButton(
+                                            onClick = onNavigateToCourseDetail,
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Tài liệu môn")
+                                        }
                                     }
                                 }
                             }
@@ -320,6 +367,7 @@ private fun ResultScreenPreview() {
                     TopicStat("Khóa chính/ngoại khóa", 5, 5, 1.0),
                     TopicStat("Phép JOIN", 4, 2, 0.5)
                 ),
+                studyAdvice = "Bạn còn nhầm điều kiện ghép bản ghi của LEFT JOIN ở 2 câu Phép JOIN. Hãy đọc lại Giao_trinh_CSDL.pdf (Trang 18) rồi làm quiz luyện tập.",
                 details = listOf(
                     QuestionResultDetail(
                         questionId = "q1",

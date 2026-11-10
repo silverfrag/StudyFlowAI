@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 from datetime import datetime
-from typing import Dict, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 from app.core.database import get_db
 from app.models.document import Document, DocumentChunk
@@ -21,6 +21,11 @@ from app.schemas.quiz import (
 )
 from app.services.gemini_service import AIServiceError
 from app.services.quiz_service import generate_quiz_with_ai
+from app.services.recommendation_service import (
+    build_quiz_submit_study_advice,
+    canonicalize_topic_display,
+    normalize_topic_group_key,
+)
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -101,8 +106,9 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
     answers_map = {ans.question_id: ans.selected_option_id for ans in payload.answers}
 
     correct_count = 0
-    details = []
-    topic_map = {}
+    details: List[QuestionResultDetail] = []
+    topic_map: Dict[str, Dict] = {}
+    wrong_items: List[Dict] = []
 
     for q in questions:
         selected_opt = answers_map.get(q.id)
@@ -111,14 +117,27 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
         if is_correct:
             correct_count += 1
 
-        # Cập nhật topic stat
-        if q.topic not in topic_map:
-            topic_map[q.topic] = {"total": 0, "correct": 0}
-        topic_map[q.topic]["total"] += 1
+        # Cập nhật topic stat (gom các biến thể dấu/khoảng trắng về 1 nhóm nhất quán)
+        display_topic = canonicalize_topic_display(q.topic) or "Kiến thức chung"
+        topic_group_key = normalize_topic_group_key(display_topic)
+        if topic_group_key not in topic_map:
+            topic_map[topic_group_key] = {"display": display_topic, "total": 0, "correct": 0}
+        topic_map[topic_group_key]["total"] += 1
         if is_correct:
-            topic_map[q.topic]["correct"] += 1
+            topic_map[topic_group_key]["correct"] += 1
 
         source_info = citation_map.get(q.source_chunk_id) if q.source_chunk_id else None
+        if not is_correct:
+            wrong_items.append(
+                {
+                    "topic": topic_map[topic_group_key]["display"],
+                    "prompt": q.prompt,
+                    "explanation": q.explanation,
+                    "doc_title": source_info[0] if source_info else None,
+                    "page_number": source_info[1] if source_info else None,
+                }
+            )
+
         details.append(
             QuestionResultDetail(
                 question_id=q.id,
@@ -166,13 +185,23 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
 
     topic_stats = [
         TopicStat(
-            topic=t,
+            topic=vals["display"],
             total_questions=vals["total"],
             correct_count=vals["correct"],
             accuracy=round(vals["correct"] / vals["total"], 2),
         )
-        for t, vals in topic_map.items()
+        for vals in topic_map.values()
     ]
+
+    try:
+        study_advice = await build_quiz_submit_study_advice(
+            quiz_title=quiz.title,
+            score=score,
+            total_questions=total_questions,
+            wrong_items=wrong_items,
+        )
+    except Exception:
+        study_advice = None
 
     return QuizSubmitResponse(
         attempt_id=attempt.id,
@@ -183,5 +212,6 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
         incorrect_count=attempt.incorrect_count,
         submitted_at=attempt.submitted_at,
         topic_stats=topic_stats,
+        study_advice=study_advice,
         details=details,
     )

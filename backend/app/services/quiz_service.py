@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.course import Course
@@ -17,6 +17,7 @@ from app.schemas.quiz import (
 )
 from app.services.document_service import EMBEDDING_DIMENSIONS
 from app.services.gemini_service import AIServiceError, embed_texts, generate_structured_json
+from app.services.recommendation_service import canonicalize_topic_display, normalize_topic_group_key
 
 CANONICAL_OPTION_IDS = ("A", "B", "C", "D")
 MAX_CONTEXT_CHUNKS_FOR_QUIZ = 8
@@ -29,7 +30,10 @@ QUIZ_SYSTEM_INSTRUCTION = (
     "1. Tạo CHÍNH XÁC số lượng câu hỏi được yêu cầu.\n"
     "2. Mỗi câu hỏi có ĐÚNG 4 phương án với id lần lượt là 'A', 'B', 'C', 'D' và duy nhất 1 đáp án đúng.\n"
     "3. Không tạo đáp án kiểu 'Tất cả các đáp án trên' nếu không thật cần thiết; các phương án nhiễu phải hợp lý và phân biệt rõ.\n"
-    "4. Điền trường topic ngắn gọn (dưới 60 ký tự) thể hiện chủ đề kiến thức của câu hỏi.\n"
+    "4. Đặt trường topic (dưới 50 ký tự) THEO QUY TẮC NHẤT QUÁN:\n"
+    "   - Nếu người dùng đã chỉ định 'Chủ đề trọng tâm yêu cầu', hãy gán ĐÚNG tên chủ đề đó cho toàn bộ câu hỏi trong bài quiz để theo dõi tiến độ ôn tập chính xác.\n"
+    "   - Nếu là bài kiểm tra tổng hợp (không chỉ định chủ đề trọng tâm), TUYỆT ĐỐI KHÔNG đặt mỗi câu một topic khác nhau; "
+    "hãy gom các câu hỏi vào CHỈ 2–3 chủ đề kiến thức lớn (mỗi chủ đề có ít nhất 2 câu khi số câu >= 4) và ưu tiên tái sử dụng đúng tên chủ đề đã có của môn học nếu cùng nội dung.\n"
     "5. Điền giải thích ngắn gọn (explanation) và chỉ số đoạn [ĐOẠN i] (source_chunk_index) làm căn cứ; nếu không gắn một đoạn cụ thể thì đặt -1."
 )
 
@@ -107,12 +111,15 @@ def _validate_and_normalize_questions(
     output: _QuizLLMOutput,
     expected_count: int,
     fallback_topic: str,
+    preferred_topic: Optional[str] = None,
+    existing_topic_map: Optional[Dict[str, str]] = None,
 ) -> List[Dict]:
     if len(output.questions) < expected_count:
         raise ValueError(
             f"AI chỉ sinh {len(output.questions)}/{expected_count} câu hỏi."
         )
 
+    cleaned_preferred = canonicalize_topic_display(preferred_topic or "")
     normalized: List[Dict] = []
     for item in output.questions[:expected_count]:
         prompt_text = item.prompt.strip()
@@ -133,7 +140,16 @@ def _validate_and_normalize_questions(
         if correct_id not in CANONICAL_OPTION_IDS:
             raise ValueError("Đáp án đúng nằm ngoài A, B, C, D.")
 
-        topic_value = (item.topic.strip() or fallback_topic)[:200]
+        if cleaned_preferred:
+            topic_value = cleaned_preferred[:200]
+        else:
+            raw_topic = canonicalize_topic_display(item.topic) or fallback_topic
+            if existing_topic_map:
+                matched = existing_topic_map.get(normalize_topic_group_key(raw_topic))
+                if matched:
+                    raw_topic = matched
+            topic_value = raw_topic[:200]
+
         explanation_text = (
             item.explanation.strip()
             or f"Đáp án đúng là {correct_id} theo nội dung tài liệu môn học."
@@ -149,6 +165,41 @@ def _validate_and_normalize_questions(
                 "source_chunk_index": item.source_chunk_index,
             }
         )
+
+    # Nếu bài quiz tổng hợp >= 4 câu mà AI vẫn chia vụn quá 3 chủ đề đơn lẻ, gom các topic xuất hiện 1 lần về chủ đề chính gần nhất
+    if not cleaned_preferred and len(normalized) >= 4:
+        group_counts: Dict[str, int] = {}
+        group_display: Dict[str, str] = {}
+        for q in normalized:
+            gk = normalize_topic_group_key(q["topic"])
+            group_counts[gk] = group_counts.get(gk, 0) + 1
+            group_display.setdefault(gk, q["topic"])
+
+        if len(group_counts) > 3:
+            major_groups = [
+                gk for gk, cnt in sorted(group_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+                if cnt >= 2
+            ]
+            if not major_groups:
+                major_groups = [gk for gk, _ in sorted(group_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:2]]
+            major_groups = major_groups[:3]
+
+            for idx, q in enumerate(normalized):
+                gk = normalize_topic_group_key(q["topic"])
+                if gk not in major_groups:
+                    target_group = major_groups[idx % len(major_groups)]
+                    # Ưu tiên chủ đề của câu kế bên cùng source_chunk_index nếu có
+                    for other in normalized:
+                        other_gk = normalize_topic_group_key(other["topic"])
+                        if (
+                            other is not q
+                            and other_gk in major_groups
+                            and other["source_chunk_index"] == q["source_chunk_index"]
+                            and q["source_chunk_index"] >= 0
+                        ):
+                            target_group = other_gk
+                            break
+                    q["topic"] = group_display[target_group]
 
     return normalized
 
@@ -206,19 +257,48 @@ async def generate_quiz_with_ai(
             },
         )
 
-    topic_label = (payload.topic or "").strip()
+    topic_label = canonicalize_topic_display(payload.topic or "")
     fallback_topic = topic_label or course.name or "Kiến thức tổng hợp"
+
+    existing_topics_res = await db.execute(
+        select(Question.topic, func.count(Question.id).label("cnt"))
+        .join(Quiz, Question.quiz_id == Quiz.id)
+        .where(Quiz.course_id == payload.course_id)
+        .group_by(Question.topic)
+        .order_by(func.count(Question.id).desc())
+        .limit(15)
+    )
+    existing_topic_map: Dict[str, str] = {}
+    existing_topics_list: List[str] = []
+    for raw_t, _ in existing_topics_res.all():
+        cleaned_t = canonicalize_topic_display(raw_t)
+        if not cleaned_t:
+            continue
+        gk = normalize_topic_group_key(cleaned_t)
+        if gk not in existing_topic_map:
+            existing_topic_map[gk] = cleaned_t
+            existing_topics_list.append(cleaned_t)
 
     context_blocks = []
     for idx, (chunk, doc_title) in enumerate(selected_chunks):
         page_label = f"Trang {chunk.page_number}" if chunk.page_number is not None else "Không phân trang"
         context_blocks.append(f"[ĐOẠN {idx}] Tài liệu: {doc_title} | {page_label}\n{chunk.text}")
 
-    focus_instruction = (
-        f"Chủ đề trọng tâm yêu cầu: '{topic_label}'. "
-        if topic_label
-        else "Phân bổ câu hỏi đều qua các kiến thức quan trọng trong tài liệu. "
-    )
+    if topic_label:
+        focus_instruction = (
+            f"Chủ đề trọng tâm yêu cầu: '{topic_label}'. "
+            f"Hãy gán ĐÚNG trường topic = '{topic_label}' cho toàn bộ {payload.question_count} câu hỏi."
+        )
+    else:
+        existing_hint = (
+            f" Các chủ đề đã có của môn học (ưu tiên dùng lại nếu cùng nội dung): {', '.join(existing_topics_list[:8])}."
+            if existing_topics_list
+            else ""
+        )
+        focus_instruction = (
+            f"Phân bổ {payload.question_count} câu hỏi đều qua 2–3 chủ đề kiến thức lớn của tài liệu "
+            f"(KHÔNG tạo mỗi câu 1 topic riêng).{existing_hint}"
+        )
 
     user_prompt = (
         f"Môn học: {course.name}\n"
@@ -248,6 +328,8 @@ async def generate_quiz_with_ai(
                 output=raw_output,
                 expected_count=payload.question_count,
                 fallback_topic=fallback_topic,
+                preferred_topic=topic_label or None,
+                existing_topic_map=existing_topic_map,
             )
             break
         except ValueError as exc:
