@@ -1,11 +1,12 @@
+import asyncio
 import logging
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
 from pypdf import PdfReader
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -18,6 +19,39 @@ EMBEDDING_DIMENSIONS = 768
 CHUNK_TARGET_WORDS = 350
 CHUNK_OVERLAP_WORDS = 60
 MAX_CHUNKS_PER_DOC = 400
+
+_ACTIVE_PROCESSING_IDS: Set[UUID] = set()
+
+
+def is_document_actively_processing(document_id: UUID) -> bool:
+    """Kiểm tra tài liệu có đang nằm trong hàng đợi hoặc đang được worker xử lý trong tiến trình hiện tại."""
+    return document_id in _ACTIVE_PROCESSING_IDS
+
+
+def mark_document_queued(document_id: UUID) -> None:
+    """Đánh dấu tài liệu đã được xếp lịch xử lý nền để tránh kích hoạt trùng lặp."""
+    _ACTIVE_PROCESSING_IDS.add(document_id)
+
+
+def clear_document_active(document_id: UUID) -> None:
+    _ACTIVE_PROCESSING_IDS.discard(document_id)
+
+
+async def recover_orphaned_processing_documents(db: AsyncSession) -> int:
+    """Chuyển các tài liệu bị kẹt trạng thái 'processing' sau khi server khởi động lại sang 'error' để người dùng thử lại."""
+    result = await db.execute(select(Document).where(Document.status == "processing"))
+    orphaned_docs = [
+        doc for doc in result.scalars().all()
+        if not is_document_actively_processing(doc.id)
+    ]
+    if not orphaned_docs:
+        return 0
+
+    for doc in orphaned_docs:
+        doc.status = "error"
+        doc.error_message = "Quá trình xử lý trước đó bị gián đoạn trước khi hoàn tất. Vui lòng nhấn thử lại."
+    await db.commit()
+    return len(orphaned_docs)
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -126,13 +160,14 @@ def chunk_pages(
 
 async def process_document(document_id: UUID, db: AsyncSession) -> None:
     """Trích xuất nội dung, chunking, tạo vector embedding và cập nhật trạng thái tài liệu."""
-    doc = await db.get(Document, document_id)
-    if not doc:
-        return
-
+    mark_document_queued(document_id)
     try:
-        pages = extract_text_pages(doc.file_path, doc.title, doc.mime_type)
-        chunks_data = chunk_pages(pages)
+        doc = await db.get(Document, document_id)
+        if not doc:
+            return
+
+        pages = await asyncio.to_thread(extract_text_pages, doc.file_path, doc.title, doc.mime_type)
+        chunks_data = await asyncio.to_thread(chunk_pages, pages)
         if not chunks_data:
             raise ValueError("Không tạo được đoạn văn bản hợp lệ từ tài liệu.")
 
@@ -163,6 +198,18 @@ async def process_document(document_id: UUID, db: AsyncSession) -> None:
         doc.status = "ready"
         doc.error_message = None
         await db.commit()
+    except asyncio.CancelledError:
+        logger.warning("Tác vụ xử lý tài liệu %s bị hủy giữa chừng.", document_id)
+        try:
+            await asyncio.shield(db.rollback())
+            doc = await db.get(Document, document_id)
+            if doc and doc.status == "processing":
+                doc.status = "error"
+                doc.error_message = "Quá trình xử lý bị gián đoạn trước khi hoàn tất. Vui lòng nhấn thử lại."
+                await asyncio.shield(db.commit())
+        except BaseException:
+            pass
+        raise
     except (ValueError, AIServiceError) as exc:
         await db.rollback()
         doc = await db.get(Document, document_id)
@@ -178,6 +225,8 @@ async def process_document(document_id: UUID, db: AsyncSession) -> None:
             doc.status = "error"
             doc.error_message = "Xử lý tài liệu thất bại do lỗi hệ thống nội bộ."
             await db.commit()
+    finally:
+        clear_document_active(document_id)
 
 
 async def process_document_background(document_id: UUID) -> None:

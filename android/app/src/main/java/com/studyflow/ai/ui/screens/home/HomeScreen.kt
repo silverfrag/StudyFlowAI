@@ -1,5 +1,6 @@
 package com.studyflow.ai.ui.screens.home
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -161,7 +162,8 @@ private fun HomeContent(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -169,7 +171,7 @@ private fun HomeContent(
                     Icon(
                         imageVector = Icons.Outlined.AutoAwesome,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -187,13 +189,14 @@ private fun HomeContent(
                     Text(
                         text = recent.courseName,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "${recent.lastQuizTitle} • Điểm: ${recent.lastScore}/10",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                     )
                     if (summary.totalQuizzesCompleted > 0) {
                         val scoreRatio = (summary.averageScore / 10.0).toFloat().coerceIn(0f, 1f)
@@ -212,7 +215,7 @@ private fun HomeContent(
                                 text = "$percent% (${summary.averageScore}/10)",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -232,7 +235,7 @@ private fun HomeContent(
                     Text(
                         text = "Bạn chưa làm bài kiểm tra nào gần đây. Hãy mở môn học để bắt đầu ôn luyện.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
@@ -364,6 +367,7 @@ private fun QuickActionCard(
 }
 
 @Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun HomeContentPreview() {
     StudyFlowTheme {

@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 sealed interface CourseDetailUiState {
     data object Loading : CourseDetailUiState
@@ -46,6 +48,39 @@ class CourseDetailViewModel(
     private val _quizError = MutableStateFlow<String?>(null)
     val quizError: StateFlow<String?> = _quizError.asStateFlow()
 
+    private val _processingStartMs = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val processingStartMs: StateFlow<Map<String, Long>> = _processingStartMs.asStateFlow()
+
+    private fun syncProcessingTimestamps(
+        docs: List<DocumentResponse>,
+        resetIds: Set<String> = emptySet()
+    ) {
+        val now = System.currentTimeMillis()
+        val prev = _processingStartMs.value
+        val next = mutableMapOf<String, Long>()
+        docs.filter { it.status == "processing" }.forEach { doc ->
+            next[doc.id] = if (doc.id in resetIds) {
+                now
+            } else {
+                prev[doc.id] ?: parseIsoTimestampMillis(doc.createdAt) ?: now
+            }
+        }
+        _processingStartMs.value = next
+    }
+
+    private fun parseIsoTimestampMillis(isoTimestamp: String): Long? {
+        val normalized = Regex("""^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$""")
+            .matchEntire(isoTimestamp.trim()) ?: return null
+        val base = normalized.groupValues[1]
+        val zoneRaw = normalized.groupValues[2]
+        val zoneNormalized = if (zoneRaw.isEmpty() || zoneRaw == "Z") "+0000" else zoneRaw.replace(":", "")
+        return try {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).parse("$base$zoneNormalized")?.time
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun loadCourseDetail(courseId: String) {
         viewModelScope.launch {
             _uiState.value = CourseDetailUiState.Loading
@@ -54,9 +89,11 @@ class CourseDetailViewModel(
             val quizzesRes = repository.getCourseQuizzes(courseId)
 
             if (courseRes.isSuccess && docsRes.isSuccess) {
+                val docs = docsRes.getOrThrow()
+                syncProcessingTimestamps(docs)
                 _uiState.value = CourseDetailUiState.Success(
                     course = courseRes.getOrThrow(),
-                    documents = docsRes.getOrThrow(),
+                    documents = docs,
                     quizzes = quizzesRes.getOrElse { emptyList() }
                 )
             } else {
@@ -103,10 +140,18 @@ class CourseDetailViewModel(
 
                 stream.use { input ->
                     repository.uploadDocument(courseId, fileName, mimeType, input)
-                        .onSuccess {
+                        .onSuccess { uploadedDoc ->
                             _isUploading.value = false
                             _actionMessage.value = "Đã tải lên '$fileName'. Tài liệu đang được xử lý."
-                            loadCourseDetail(courseId)
+                            val latest = _uiState.value as? CourseDetailUiState.Success
+                            if (latest != null) {
+                                val updatedDocs = listOf(uploadedDoc) + latest.documents.filterNot { it.id == uploadedDoc.id }
+                                syncProcessingTimestamps(updatedDocs, resetIds = setOf(uploadedDoc.id))
+                                _uiState.value = latest.copy(documents = updatedDocs)
+                                refreshDocumentsSilently(courseId)
+                            } else {
+                                loadCourseDetail(courseId)
+                            }
                         }
                         .onFailure { err ->
                             _isUploading.value = false
@@ -133,9 +178,11 @@ class CourseDetailViewModel(
                 val course = courseDeferred.await()
 
                 val latest = _uiState.value as? CourseDetailUiState.Success ?: return@coroutineScope
+                val mergedDocs = docs ?: latest.documents
+                syncProcessingTimestamps(mergedDocs)
                 _uiState.value = latest.copy(
                     course = course ?: latest.course,
-                    documents = docs ?: latest.documents,
+                    documents = mergedDocs,
                     quizzes = quizzes ?: latest.quizzes
                 )
             }
@@ -149,11 +196,13 @@ class CourseDetailViewModel(
                 .onSuccess { updatedDoc ->
                     val latest = _uiState.value as? CourseDetailUiState.Success
                     if (latest != null) {
-                        _uiState.value = latest.copy(
-                            documents = latest.documents.map { doc ->
-                                if (doc.id == documentId) updatedDoc else doc
-                            }
-                        )
+                        val mappedDocs = latest.documents.map { doc ->
+                            if (doc.id == documentId) updatedDoc else doc
+                        }
+                        syncProcessingTimestamps(mappedDocs, resetIds = setOf(documentId))
+                        _uiState.value = latest.copy(documents = mappedDocs)
+                    } else {
+                        syncProcessingTimestamps(listOf(updatedDoc), resetIds = setOf(documentId))
                     }
                     _actionMessage.value = "Đã gửi yêu cầu xử lý lại tài liệu."
                     refreshDocumentsSilently(courseId)

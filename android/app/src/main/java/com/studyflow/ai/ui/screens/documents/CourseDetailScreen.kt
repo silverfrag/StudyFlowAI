@@ -52,7 +52,9 @@ fun CourseDetailScreen(
     val isCreatingQuiz by viewModel.isCreatingQuiz.collectAsState()
     val actionMessage by viewModel.actionMessage.collectAsState()
     val quizError by viewModel.quizError.collectAsState()
+    val processingStartMs by viewModel.processingStartMs.collectAsState()
 
+    var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showCreateQuizDialog by remember { mutableStateOf(false) }
     var docToDelete by remember { mutableStateOf<DocumentResponse?>(null) }
 
@@ -83,8 +85,10 @@ fun CourseDetailScreen(
 
     LaunchedEffect(courseId, hasProcessingDocs) {
         if (hasProcessingDocs) {
+            currentTimeMs = System.currentTimeMillis()
             while (true) {
                 delay(3500)
+                currentTimeMs = System.currentTimeMillis()
                 viewModel.refreshDocumentsSilently(courseId)
             }
         }
@@ -285,9 +289,14 @@ fun CourseDetailScreen(
                             }
                         } else {
                             items(state.documents, key = { "doc-${it.id}" }) { doc ->
+                                val startedAt = processingStartMs[doc.id] ?: currentTimeMs
+                                val isStaleProcessing = doc.status == "processing" &&
+                                    (currentTimeMs - startedAt) >= 180_000L
+                                val canRetryDoc = doc.status == "error" || isStaleProcessing
                                 DocumentCard(
                                     doc = doc,
-                                    onRetryProcessClick = if (doc.status == "error") {
+                                    isStaleProcessing = isStaleProcessing,
+                                    onRetryProcessClick = if (canRetryDoc) {
                                         { viewModel.retryDocument(courseId, doc.id) }
                                     } else null,
                                     onDeleteClick = { docToDelete = doc }
@@ -424,6 +433,7 @@ fun CourseDetailScreen(
 @Composable
 private fun DocumentCard(
     doc: DocumentResponse,
+    isStaleProcessing: Boolean = false,
     onRetryProcessClick: (() -> Unit)? = null,
     onDeleteClick: () -> Unit
 ) {
@@ -468,13 +478,25 @@ private fun DocumentCard(
                         contentColor = statusTextColor,
                         shape = RoundedCornerShape(6.dp)
                     ) {
-                        Text(
-                            text = statusLabel,
-                            color = statusTextColor,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
+                        ) {
+                            if (doc.status == "processing") {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(11.dp),
+                                    strokeWidth = 1.6.dp,
+                                    color = statusTextColor
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                            }
+                            Text(
+                                text = statusLabel,
+                                color = statusTextColor,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -485,7 +507,18 @@ private fun DocumentCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (doc.status == "error") {
+                if (doc.status == "processing") {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isStaleProcessing) {
+                            "Xử lý lâu hơn dự kiến. Bạn có thể nhấn thử xử lý lại hoặc tải lại tệp."
+                        } else {
+                            "Đang trích xuất & lập chỉ mục AI (tệp lớn có thể mất 1–2 phút)..."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (doc.status == "error") {
                     val msg = doc.errorMessage?.takeIf { it.isNotBlank() }
                         ?: "Trích xuất thất bại. Vui lòng thử xử lý lại hoặc xóa tệp này."
                     Spacer(modifier = Modifier.height(4.dp))
@@ -496,7 +529,7 @@ private fun DocumentCard(
                     )
                 }
             }
-            if (doc.status == "error" && onRetryProcessClick != null) {
+            if ((doc.status == "error" || isStaleProcessing) && onRetryProcessClick != null) {
                 IconButton(onClick = onRetryProcessClick) {
                     Icon(
                         imageVector = Icons.Outlined.Refresh,
@@ -758,6 +791,19 @@ private fun DocumentCardPreview() {
                     status = "ready",
                     errorMessage = null,
                     createdAt = "2026-11-10T07:00:00Z"
+                ),
+                onDeleteClick = {}
+            )
+            DocumentCard(
+                doc = DocumentResponse(
+                    id = "d3",
+                    courseId = "c1",
+                    title = "Chuong_4_Dang_xu_ly.pdf",
+                    fileSize = 1288000,
+                    mimeType = "application/pdf",
+                    status = "processing",
+                    errorMessage = null,
+                    createdAt = "2026-11-10T07:10:00Z"
                 ),
                 onDeleteClick = {}
             )

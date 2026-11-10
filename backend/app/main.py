@@ -6,7 +6,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import AsyncSessionLocal, init_db
+from app.services.document_service import recover_orphaned_processing_documents
 from app.api.v1.health import router as health_router
 from app.api.v1.courses import router as courses_router
 from app.api.v1.documents import router as documents_router
@@ -17,9 +18,13 @@ from app.api.v1.progress import router as progress_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Khởi động database và pgvector extension
+    # Khởi động database, pgvector extension và phục hồi các tài liệu bị gián đoạn trước đó
     try:
         await init_db()
+        async with AsyncSessionLocal() as db:
+            recovered = await recover_orphaned_processing_documents(db)
+            if recovered:
+                print(f"Recovered {recovered} orphaned processing document(s) to error state.")
         print("Database & vector extension initialized successfully.")
     except Exception as e:
         print(f"Warning: Could not connect to DB on startup: {e}")

@@ -17,8 +17,9 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import AsyncSessionLocal, engine
 from app.main import app
+from app.models.document import Document
 from app.services import document_service, gemini_service, quiz_service, rag_service
 
 
@@ -550,6 +551,63 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     inter_batch_delay=0.0,
                 )
         self.assertIn("API key", str(ctx.exception))
+
+    async def test_recover_orphaned_processing_documents_and_retry_guard(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            c_res = await client.post("/api/v1/courses", json={"name": "__TEST_ORPHAN_DOC__"})
+            self.assertEqual(c_res.status_code, 201, c_res.text)
+            c_id = c_res.json()["id"]
+            self.created_course_ids.append(c_id)
+
+            pdf_bytes = _build_minimal_pdf_bytes("Stale processing recovery test.")
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.6)])):
+                up_res = await client.post(
+                    f"/api/v1/courses/{c_id}/documents",
+                    files={"file": ("orphan_test.pdf", pdf_bytes, "application/pdf")},
+                )
+            self.assertEqual(up_res.status_code, 202, up_res.text)
+            doc_id = UUID(up_res.json()["id"])
+
+            # Giả lập tài liệu bị treo ở trạng thái 'processing' do server restart (không có worker active)
+            async with AsyncSessionLocal() as db:
+                db_doc = await db.get(Document, doc_id)
+                self.assertIsNotNone(db_doc)
+                db_doc.status = "processing"
+                db_doc.error_message = None
+                await db.commit()
+
+            # Khi đánh dấu active -> retry phải giữ idempotent (không chạy lại nền)
+            document_service.mark_document_queued(doc_id)
+            try:
+                with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.6)])) as mocked_embed:
+                    idempotent_retry = await client.post(f"/api/v1/documents/{doc_id}/retry")
+                self.assertEqual(idempotent_retry.status_code, 202)
+                self.assertEqual(mocked_embed.await_count, 0)
+            finally:
+                document_service.clear_document_active(doc_id)
+
+            # Khi không còn active trong bộ nhớ -> retry phải phục hồi & xử lý lại thành ready
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.6)])) as mocked_embed:
+                recover_retry = await client.post(f"/api/v1/documents/{doc_id}/retry")
+            self.assertEqual(recover_retry.status_code, 202)
+            self.assertGreaterEqual(mocked_embed.await_count, 1)
+            st_ready = await client.get(f"/api/v1/documents/{doc_id}/status")
+            self.assertEqual(st_ready.json()["status"], "ready")
+
+            # Kiểm tra hàm startup recovery dọn các dòng processing mồ côi sang error
+            async with AsyncSessionLocal() as db:
+                db_doc = await db.get(Document, doc_id)
+                db_doc.status = "processing"
+                db_doc.error_message = None
+                await db.commit()
+                recovered_count = await document_service.recover_orphaned_processing_documents(db)
+                self.assertGreaterEqual(recovered_count, 1)
+                await db.refresh(db_doc)
+                self.assertEqual(db_doc.status, "error")
+                self.assertIn("gián đoạn", db_doc.error_message or "")
 
 
 if __name__ == "__main__":

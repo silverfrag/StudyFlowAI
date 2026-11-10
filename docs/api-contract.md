@@ -202,7 +202,7 @@ Polling kiểm tra tiến độ xử lý tài liệu.
 ```
 
 #### `POST /api/v1/documents/{document_id}/retry`
-Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` mà file gốc vẫn còn trên server (idempotent nếu tài liệu đang ở trạng thái `processing`).
+Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` hoặc bản ghi `processing` bị mồ côi do gián đoạn tác vụ nền nếu file gốc vẫn còn trên server (idempotent nếu tài liệu đang được worker xử lý).
 - **Response:** `202 Accepted` (Trả về Document Object với `status: "processing"`, `error_message: null`; trả `400 VALIDATION_ERROR` nếu file gốc không còn tồn tại trên storage).
 
 #### `DELETE /api/v1/documents/{document_id}`

@@ -12,7 +12,11 @@ from app.core.config import settings
 from app.models.course import Course
 from app.models.document import Document
 from app.schemas.document import DocumentResponse, DocumentStatusResponse
-from app.services.document_service import process_document_background
+from app.services.document_service import (
+    is_document_actively_processing,
+    mark_document_queued,
+    process_document_background,
+)
 
 router = APIRouter(tags=["Documents"])
 
@@ -106,6 +110,7 @@ async def upload_document(
     await db.refresh(doc)
 
     # Kích hoạt background task trích xuất văn bản, chia chunk và tạo embedding
+    mark_document_queued(doc.id)
     background_tasks.add_task(process_document_background, doc.id)
 
     return DocumentResponse(
@@ -179,11 +184,12 @@ async def retry_document_processing(
             },
         )
 
-    if doc.status != "processing":
+    if doc.status != "processing" or not is_document_actively_processing(doc.id):
         doc.status = "processing"
         doc.error_message = None
         await db.commit()
         await db.refresh(doc)
+        mark_document_queued(doc.id)
         background_tasks.add_task(process_document_background, doc.id)
 
     return DocumentResponse(

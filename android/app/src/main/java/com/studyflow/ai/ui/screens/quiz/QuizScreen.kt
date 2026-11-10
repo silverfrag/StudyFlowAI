@@ -176,7 +176,8 @@ fun QuizScreen(
                                         colors = CardDefaults.outlinedCardColors(
                                             containerColor = if (isSelected)
                                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                                            else MaterialTheme.colorScheme.surface
+                                            else MaterialTheme.colorScheme.surface,
+                                            contentColor = MaterialTheme.colorScheme.onSurface
                                         )
                                     ) {
                                         Row(
