@@ -41,6 +41,19 @@ async def list_courses(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
 async def create_course(payload: CourseCreate, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(
+        select(Course).where(func.lower(func.trim(Course.name)) == payload.name.lower())
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": "Môn học có tên này đã tồn tại.",
+                "field": "name",
+            },
+        )
+
     course = Course(name=payload.name, description=payload.description)
     db.add(course)
     await db.commit()
@@ -84,9 +97,24 @@ async def update_course(course_id: UUID, payload: CourseUpdate, db: AsyncSession
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
         )
-    if payload.name is not None:
+    if "name" in payload.model_fields_set and payload.name is not None:
+        dup = await db.execute(
+            select(Course).where(
+                func.lower(func.trim(Course.name)) == payload.name.lower(),
+                Course.id != course.id,
+            )
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": "Môn học có tên này đã tồn tại.",
+                    "field": "name",
+                },
+            )
         course.name = payload.name
-    if payload.description is not None:
+    if "description" in payload.model_fields_set:
         course.description = payload.description
 
     await db.commit()

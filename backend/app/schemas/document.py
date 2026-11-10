@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from uuid import UUID
-from datetime import datetime
 from typing import Optional, Literal
+
+from app.schemas.common import UtcDatetime
 
 DocumentStatus = Literal["processing", "ready", "error"]
 
@@ -14,7 +15,7 @@ class DocumentResponse(BaseModel):
     mime_type: str
     status: DocumentStatus
     error_message: Optional[str] = None
-    created_at: datetime
+    created_at: UtcDatetime
 
     class Config:
         from_attributes = True

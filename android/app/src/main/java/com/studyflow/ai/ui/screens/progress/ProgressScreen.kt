@@ -9,14 +9,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.RecommendationItem
 import com.studyflow.ai.data.model.SuggestedDocument
@@ -34,12 +41,29 @@ fun ProgressScreen(
     onNavigateToCourses: () -> Unit,
     viewModel: ProgressViewModel = viewModel()
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val isStartingPractice by viewModel.isStartingPractice.collectAsState()
+    val startingTopic by viewModel.startingTopic.collectAsState()
     val practiceError by viewModel.practiceError.collectAsState()
+    var skipNextResume by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        viewModel.loadProgress()
+        viewModel.loadProgress(silent = uiState is ProgressUiState.Success)
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (skipNextResume) {
+                    skipNextResume = false
+                } else {
+                    viewModel.loadProgress(silent = true)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
@@ -183,6 +207,7 @@ fun ProgressScreen(
                                     RecommendationCard(
                                         item = item,
                                         isBusy = isStartingPractice,
+                                        isThisTopicLoading = isStartingPractice && startingTopic == item.topic,
                                         onOpenCourse = { onOpenCourseDetail(item.courseId) },
                                         onPracticeClick = {
                                             viewModel.startPracticeQuiz(item.courseId, item.topic) { quiz ->
@@ -204,6 +229,7 @@ fun ProgressScreen(
 private fun RecommendationCard(
     item: RecommendationItem,
     isBusy: Boolean,
+    isThisTopicLoading: Boolean = false,
     onOpenCourse: () -> Unit,
     onPracticeClick: () -> Unit
 ) {
@@ -287,7 +313,17 @@ private fun RecommendationCard(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Luyện quiz")
+                    if (isThisTopicLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Đang tạo...")
+                    } else {
+                        Text("Luyện quiz")
+                    }
                 }
             }
         }

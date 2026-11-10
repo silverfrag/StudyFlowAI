@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from uuid import UUID
-from datetime import datetime
 from typing import Optional, List
+
+from app.schemas.common import UtcDatetime
 
 
 class RecentActivity(BaseModel):
@@ -9,7 +10,7 @@ class RecentActivity(BaseModel):
     course_name: str
     last_quiz_title: str
     last_score: float
-    last_active_at: datetime
+    last_active_at: UtcDatetime
 
 
 class ProgressSummaryResponse(BaseModel):

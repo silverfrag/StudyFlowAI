@@ -119,7 +119,7 @@ Lấy danh sách tất cả các môn học.
 ```
 
 #### `POST /api/v1/courses`
-Tạo môn học mới.
+Tạo môn học mới (kiểm tra tên không rỗng và không trùng tên môn hiện có; trả `400 VALIDATION_ERROR` nếu vi phạm).
 - **Request Body:**
 ```json
 {
@@ -134,7 +134,7 @@ Chi tiết một môn học.
 - **Response:** `200 OK` (Trả về Course Object).
 
 #### `PATCH /api/v1/courses/{course_id}`
-Cập nhật môn học.
+Cập nhật môn học (kiểm tra tên không trùng với môn khác; gửi `description: null` hoặc `""` để xóa mô tả).
 - **Request Body:**
 ```json
 {
@@ -202,7 +202,7 @@ Polling kiểm tra tiến độ xử lý tài liệu.
 ```
 
 #### `POST /api/v1/documents/{document_id}/retry`
-Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` mà file gốc vẫn còn trên server.
+Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` mà file gốc vẫn còn trên server (idempotent nếu tài liệu đang ở trạng thái `processing`).
 - **Response:** `202 Accepted` (Trả về Document Object với `status: "processing"`, `error_message: null`; trả `400 VALIDATION_ERROR` nếu file gốc không còn tồn tại trên storage).
 
 #### `DELETE /api/v1/documents/{document_id}`

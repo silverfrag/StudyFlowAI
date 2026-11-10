@@ -2,9 +2,10 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Sequence, Type, TypeVar
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
@@ -153,13 +154,56 @@ def extract_interaction_text(interaction: Any) -> str:
     return "".join(parts)
 
 
+_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+_DOC_QUOTA_RETRY_DELAYS = (5.0, 15.0, 25.0, 20.0)
+_DOC_TRANSIENT_RETRY_DELAYS = (1.5, 3.0, 6.0)
+_QUERY_RETRY_DELAYS = (1.0, 2.5)
+
+
+def _extract_retry_delay_seconds(exc: Exception) -> Optional[float]:
+    raw = f"{getattr(exc, 'message', '') or ''} {exc}"
+    match = re.search(r"retry\s*(?:in|after)\s*(\d+(?:\.\d+)?)s", raw, re.IGNORECASE)
+    if match:
+        return min(max(float(match.group(1)) + 1.0, 2.0), 65.0)
+    match_json = re.search(r"retryDelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", raw, re.IGNORECASE)
+    if match_json:
+        return min(max(float(match_json.group(1)) + 1.0, 2.0), 65.0)
+    return None
+
+
+def _is_retryable_embedding_error(exc: Exception) -> bool:
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)):
+        return True
+    if isinstance(exc, genai_errors.APIError):
+        return getattr(exc, "code", None) in _RETRYABLE_STATUS_CODES
+    return False
+
+
+def _classify_embedding_error(exc: Exception) -> AIServiceError:
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return AIServiceError("Dịch vụ AI xử lý embedding quá thời gian phản hồi.")
+    if isinstance(exc, genai_errors.APIError):
+        code = getattr(exc, "code", None)
+        if code in (401, 403):
+            return AIServiceError("API key Gemini không hợp lệ hoặc chưa đủ quyền truy cập dịch vụ embedding.")
+        if code == 429:
+            return AIServiceError("Dịch vụ Gemini AI đang tạm hết hạn mức (429). Vui lòng đợi khoảng 1 phút rồi nhấn thử lại.")
+        if code in (408, 504):
+            return AIServiceError("Dịch vụ AI xử lý embedding quá thời gian phản hồi.")
+        if code in (500, 502, 503):
+            return AIServiceError("Dịch vụ Gemini AI đang tạm thời quá tải. Vui lòng thử lại sau ít phút.")
+    return AIServiceError("Không thể tạo vector embedding từ dịch vụ Gemini AI.")
+
+
 async def embed_texts(
     texts: List[str],
     task_type: str = "RETRIEVAL_DOCUMENT",
     dimensions: int = 768,
-    batch_size: int = 32,
+    batch_size: int = 20,
+    retry_delays: Optional[Sequence[float]] = None,
+    inter_batch_delay: float = 0.25,
 ) -> List[List[float]]:
-    """Tạo vector embedding 768 chiều bằng Gemini Embedding API."""
+    """Tạo vector embedding 768 chiều bằng Gemini Embedding API (có chia batch nhỏ và retry/backoff)."""
     if not texts:
         return []
 
@@ -167,28 +211,72 @@ async def embed_texts(
     model = resolve_embedding_model()
     vectors: List[List[float]] = []
 
-    for start in range(0, len(texts), batch_size):
+    total_batches = (len(texts) + batch_size - 1) // batch_size
+    for batch_idx, start in enumerate(range(0, len(texts), batch_size)):
+        if batch_idx > 0 and inter_batch_delay > 0:
+            await asyncio.sleep(inter_batch_delay)
+
         batch = texts[start : start + batch_size]
-        try:
-            response = await asyncio.wait_for(
-                client.aio.models.embed_content(
-                    model=model,
-                    contents=batch,
-                    config=types.EmbedContentConfig(
-                        output_dimensionality=dimensions,
-                        task_type=task_type,
+        attempt = 0
+        response = None
+
+        while True:
+            try:
+                response = await asyncio.wait_for(
+                    client.aio.models.embed_content(
+                        model=model,
+                        contents=batch,
+                        config=types.EmbedContentConfig(
+                            output_dimensionality=dimensions,
+                            task_type=task_type,
+                        ),
                     ),
-                ),
-                timeout=settings.GEMINI_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError as exc:
-            logger.warning("Gemini embed_content timeout sau %.1fs", settings.GEMINI_TIMEOUT_SECONDS)
-            raise AIServiceError("Dịch vụ AI xử lý embedding quá thời gian phản hồi.") from exc
-        except AIServiceError:
-            raise
-        except Exception as exc:
-            logger.warning("Lỗi gọi Gemini embed_content: %s", type(exc).__name__)
-            raise AIServiceError("Không thể tạo vector embedding từ dịch vụ Gemini AI.") from exc
+                    timeout=settings.GEMINI_TIMEOUT_SECONDS,
+                )
+                break
+            except AIServiceError:
+                raise
+            except Exception as exc:
+                err_code = getattr(exc, "code", None)
+                err_status = getattr(exc, "status", None)
+                can_retry = _is_retryable_embedding_error(exc)
+                if retry_delays is not None:
+                    schedule = tuple(retry_delays)
+                elif task_type == "RETRIEVAL_DOCUMENT":
+                    schedule = _DOC_QUOTA_RETRY_DELAYS if err_code == 429 else _DOC_TRANSIENT_RETRY_DELAYS
+                else:
+                    schedule = _QUERY_RETRY_DELAYS
+
+                if can_retry and attempt < len(schedule):
+                    wait_seconds = schedule[attempt]
+                    if err_code == 429 and retry_delays is None:
+                        hinted = _extract_retry_delay_seconds(exc)
+                        if hinted is not None:
+                            wait_seconds = hinted
+                    logger.warning(
+                        "Gemini embed_content batch %d/%d tạm lỗi (%s code=%s status=%s), thử lại sau %.1fs (lần %d/%d).",
+                        batch_idx + 1,
+                        total_batches,
+                        type(exc).__name__,
+                        err_code,
+                        err_status,
+                        wait_seconds,
+                        attempt + 1,
+                        len(schedule),
+                    )
+                    attempt += 1
+                    await asyncio.sleep(wait_seconds)
+                    continue
+
+                logger.warning(
+                    "Lỗi gọi Gemini embed_content batch %d/%d: %s (code=%s, status=%s)",
+                    batch_idx + 1,
+                    total_batches,
+                    type(exc).__name__,
+                    err_code,
+                    err_status,
+                )
+                raise _classify_embedding_error(exc) from exc
 
         embeddings = getattr(response, "embeddings", None) or []
         if len(embeddings) != len(batch):
@@ -251,7 +339,17 @@ async def generate_structured_json(
         except AIServiceError:
             raise
         except Exception as exc:
-            logger.warning("Lỗi gọi Gemini interactions.create (%s): %s", model, type(exc).__name__)
+            err_code = getattr(exc, "code", None)
+            err_status = getattr(exc, "status", None)
+            logger.warning(
+                "Lỗi gọi Gemini interactions.create (%s): %s (code=%s, status=%s)",
+                model,
+                type(exc).__name__,
+                err_code,
+                err_status,
+            )
+            if err_code in (401, 403):
+                raise AIServiceError("API key Gemini không hợp lệ hoặc chưa đủ quyền truy cập.") from exc
             last_error_message = "Dịch vụ Gemini AI hiện không khả dụng hoặc hết hạn mức."
             if has_fallback:
                 continue

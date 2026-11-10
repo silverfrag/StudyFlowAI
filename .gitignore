@@ -50,6 +50,7 @@ build/
 # Android / Kotlin / Gradle
 *.iml
 .gradle/
+.kotlin/
 **/local.properties
 local.properties
 .externalNativeBuild/

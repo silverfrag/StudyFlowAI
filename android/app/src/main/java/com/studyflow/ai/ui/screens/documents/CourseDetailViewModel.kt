@@ -10,6 +10,8 @@ import com.studyflow.ai.data.model.DocumentResponse
 import com.studyflow.ai.data.model.QuizResponse
 import com.studyflow.ai.data.model.QuizSummaryResponse
 import com.studyflow.ai.data.repository.StudyFlowRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -119,12 +121,24 @@ class CourseDetailViewModel(
     }
 
     fun refreshDocumentsSilently(courseId: String) {
-        val current = _uiState.value as? CourseDetailUiState.Success ?: return
+        if (_uiState.value !is CourseDetailUiState.Success) return
         viewModelScope.launch {
-            val docs = repository.getCourseDocuments(courseId).getOrNull() ?: current.documents
-            val quizzes = repository.getCourseQuizzes(courseId).getOrNull() ?: current.quizzes
-            val course = repository.getCourse(courseId).getOrNull() ?: current.course
-            _uiState.value = current.copy(course = course, documents = docs, quizzes = quizzes)
+            coroutineScope {
+                val docsDeferred = async { repository.getCourseDocuments(courseId).getOrNull() }
+                val quizzesDeferred = async { repository.getCourseQuizzes(courseId).getOrNull() }
+                val courseDeferred = async { repository.getCourse(courseId).getOrNull() }
+
+                val docs = docsDeferred.await()
+                val quizzes = quizzesDeferred.await()
+                val course = courseDeferred.await()
+
+                val latest = _uiState.value as? CourseDetailUiState.Success ?: return@coroutineScope
+                _uiState.value = latest.copy(
+                    course = course ?: latest.course,
+                    documents = docs ?: latest.documents,
+                    quizzes = quizzes ?: latest.quizzes
+                )
+            }
         }
     }
 
@@ -132,7 +146,15 @@ class CourseDetailViewModel(
         viewModelScope.launch {
             _actionMessage.value = null
             repository.retryDocument(documentId)
-                .onSuccess {
+                .onSuccess { updatedDoc ->
+                    val latest = _uiState.value as? CourseDetailUiState.Success
+                    if (latest != null) {
+                        _uiState.value = latest.copy(
+                            documents = latest.documents.map { doc ->
+                                if (doc.id == documentId) updatedDoc else doc
+                            }
+                        )
+                    }
                     _actionMessage.value = "Đã gửi yêu cầu xử lý lại tài liệu."
                     refreshDocumentsSilently(courseId)
                 }

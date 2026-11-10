@@ -28,10 +28,6 @@ class CoursesViewModel(
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
-    init {
-        loadCourses()
-    }
-
     fun loadCourses(silent: Boolean = false) {
         viewModelScope.launch {
             if (!silent || _uiState.value !is CoursesUiState.Success) {
@@ -76,7 +72,7 @@ class CoursesViewModel(
         viewModelScope.launch {
             _isCreating.value = true
             _actionError.value = null
-            repository.updateCourse(courseId, name.trim(), description?.trim()?.takeIf { it.isNotEmpty() })
+            repository.updateCourse(courseId, name.trim(), description?.trim() ?: "")
                 .onSuccess {
                     _isCreating.value = false
                     onSuccess()

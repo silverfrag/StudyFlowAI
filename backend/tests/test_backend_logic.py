@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import httpx
+from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 # Đảm bảo import được app khi chạy từ thư mục backend hoặc thư mục gốc
@@ -176,14 +177,29 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
         ) as client:
-            # 1. Tạo môn học test
+            # 1. Tạo môn học test + kiểm tra chuẩn ISO UTC Z, chống trùng tên & xóa mô tả khi PATCH
             course_res = await client.post(
                 "/api/v1/courses",
                 json={"name": "__TEST_AUTO_CSDL__", "description": "Automated backend verification"},
             )
             self.assertEqual(course_res.status_code, 201, course_res.text)
+            self.assertTrue(course_res.json()["created_at"].endswith("Z"))
             course_id = course_res.json()["id"]
             self.created_course_ids.append(course_id)
+
+            dup_course = await client.post(
+                "/api/v1/courses",
+                json={"name": "  __test_auto_csdl__  "},
+            )
+            self.assertEqual(dup_course.status_code, 400)
+            self.assertEqual(dup_course.json()["detail"]["code"], "VALIDATION_ERROR")
+
+            clear_desc = await client.patch(
+                f"/api/v1/courses/{course_id}",
+                json={"name": "__TEST_AUTO_CSDL__", "description": ""},
+            )
+            self.assertEqual(clear_desc.status_code, 200)
+            self.assertIsNone(clear_desc.json()["description"])
 
             # 2. Hỏi AI & Tạo quiz khi CHƯA có tài liệu sẵn sàng
             empty_ask = await client.post(
@@ -215,6 +231,20 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(bad_ext_res.status_code, 400)
             self.assertEqual(bad_ext_res.json()["detail"]["code"], "UNSUPPORTED_FILE_TYPE")
+
+            fake_pdf_res = await client.post(
+                f"/api/v1/courses/{course_id}/documents",
+                files={"file": ("fake.pdf", b"not a real pdf binary", "application/pdf")},
+            )
+            self.assertEqual(fake_pdf_res.status_code, 400)
+            self.assertEqual(fake_pdf_res.json()["detail"]["code"], "UNSUPPORTED_FILE_TYPE")
+
+            bad_mime_res = await client.post(
+                f"/api/v1/courses/{course_id}/documents",
+                files={"file": ("image.pdf", b"%PDF-1.4\n...", "image/png")},
+            )
+            self.assertEqual(bad_mime_res.status_code, 400)
+            self.assertEqual(bad_mime_res.json()["detail"]["code"], "UNSUPPORTED_FILE_TYPE")
 
             # 4. Upload PDF hợp lệ với mocked embed_texts -> BackgroundTasks tự chuyển trạng thái ready
             pdf_bytes = _build_minimal_pdf_bytes("Primary Key cannot be NULL. Foreign Key links two relations.")
@@ -457,6 +487,69 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(called_models, ["gemini-3.8-flash", "gemini-3.5-flash-lite"])
         self.assertEqual(res.answer, "OK fallback")
+
+    async def test_embed_texts_batch_split_and_429_retry_recovery(self):
+        class _DummyEmb:
+            def __init__(self, val: float):
+                self.values = _deterministic_vec(val)
+
+        class _DummyResp:
+            def __init__(self, n: int):
+                self.embeddings = [_DummyEmb(0.1 * (i + 1)) for i in range(n)]
+
+        calls: List[int] = []
+
+        class _FakeModels:
+            async def embed_content(self, **kwargs):
+                batch_len = len(kwargs["contents"])
+                calls.append(batch_len)
+                # Mô phỏng batch 2 bị 429 lần đầu rồi thành công ở lần thử lại
+                if len(calls) == 2:
+                    raise genai_errors.ClientError(
+                        429,
+                        {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}},
+                    )
+                return _DummyResp(batch_len)
+
+        class _FakeAio:
+            models = _FakeModels()
+
+        class _FakeClient:
+            aio = _FakeAio()
+
+        sample_texts = [f"chunk {i}" for i in range(45)]
+        with patch("app.services.gemini_service.get_genai_client", return_value=_FakeClient()):
+            vectors = await gemini_service.embed_texts(
+                sample_texts,
+                batch_size=20,
+                retry_delays=(0.01, 0.01),
+                inter_batch_delay=0.0,
+            )
+
+        self.assertEqual(len(vectors), 45)
+        self.assertEqual(calls, [20, 20, 20, 5])
+
+        class _AuthFailModels:
+            async def embed_content(self, **kwargs):
+                raise genai_errors.ClientError(
+                    403,
+                    {"error": {"code": 403, "status": "PERMISSION_DENIED", "message": "Invalid key"}},
+                )
+
+        class _AuthFailAio:
+            models = _AuthFailModels()
+
+        class _AuthFailClient:
+            aio = _AuthFailAio()
+
+        with patch("app.services.gemini_service.get_genai_client", return_value=_AuthFailClient()):
+            with self.assertRaises(gemini_service.AIServiceError) as ctx:
+                await gemini_service.embed_texts(
+                    ["single chunk"],
+                    retry_delays=(0.01,),
+                    inter_batch_delay=0.0,
+                )
+        self.assertIn("API key", str(ctx.exception))
 
 
 if __name__ == "__main__":

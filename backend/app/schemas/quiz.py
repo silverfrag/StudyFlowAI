@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
 from uuid import UUID
-from datetime import datetime
 from typing import Optional, List, Literal
+
+from app.schemas.common import UtcDatetime
 
 OptionId = Literal["A", "B", "C", "D"]
 
@@ -31,7 +32,7 @@ class QuizClientResponse(BaseModel):
     title: str
     total_questions: int
     questions: List[QuizQuestionClientResponse]
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class QuizSummaryResponse(BaseModel):
@@ -41,7 +42,7 @@ class QuizSummaryResponse(BaseModel):
     total_questions: int
     attempt_count: int = 0
     latest_score: Optional[float] = None
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class AnswerSubmission(BaseModel):
@@ -82,7 +83,7 @@ class QuizSubmitResponse(BaseModel):
     total_questions: int
     correct_count: int
     incorrect_count: int
-    submitted_at: datetime
+    submitted_at: UtcDatetime
     topic_stats: List[TopicStat]
     details: List[QuestionResultDetail]
 

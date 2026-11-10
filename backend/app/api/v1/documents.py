@@ -42,6 +42,20 @@ async def upload_document(
         )
     filename = f"{stem[:180]}{ext_raw}"
 
+    # Validate MIME type phù hợp định dạng
+    declared_mime = (file.content_type or "").split(";", 1)[0].strip().lower()
+    allowed_pdf_mimes = {"", "application/octet-stream", "application/pdf", "application/x-pdf"}
+    if ext == ".pdf" and declared_mime not in allowed_pdf_mimes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "MIME type không hợp lệ cho tệp PDF."},
+        )
+    if ext == ".txt" and declared_mime not in {"", "application/octet-stream"} and not declared_mime.startswith("text/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "MIME type không hợp lệ cho tệp TXT."},
+        )
+
     # Đọc nội dung & kiểm tra dung lượng
     content = await file.read()
     file_size = len(content)
@@ -57,14 +71,26 @@ async def upload_document(
             detail={"code": "FILE_TOO_LARGE", "message": f"Dung lượng file vượt quá giới hạn {settings.MAX_UPLOAD_SIZE_MB}MB."},
         )
 
-    # Lưu file vật lý vào thư mục storage
+    # Kiểm tra chữ ký tệp thực tế (chống đổi đuôi tệp giả mạo)
+    if ext == ".pdf" and b"%PDF-" not in content[:1024]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "Nội dung tệp không phải định dạng PDF hợp lệ."},
+        )
+    if ext == ".txt" and b"\x00" in content[:4096]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "Nội dung tệp TXT không hợp lệ (chứa dữ liệu nhị phân)."},
+        )
+
+    # Tự sinh tên file lưu trữ ngắn gọn, an toàn theo UUID; giữ nguyên tên hiển thị ở title
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
-    stored_name = f"{uuid.uuid4()}_{filename}"
+    stored_name = f"{uuid.uuid4()}{ext}"
     file_path = os.path.join(settings.STORAGE_DIR, stored_name)
     with open(file_path, "wb") as f:
         f.write(content)
 
-    mime_type = file.content_type or ("application/pdf" if ext == ".pdf" else "text/plain")
+    mime_type = "application/pdf" if ext == ".pdf" else "text/plain"
 
     # Tạo bản ghi Document với status "processing"
     doc = Document(
@@ -153,12 +179,12 @@ async def retry_document_processing(
             },
         )
 
-    doc.status = "processing"
-    doc.error_message = None
-    await db.commit()
-    await db.refresh(doc)
-
-    background_tasks.add_task(process_document_background, doc.id)
+    if doc.status != "processing":
+        doc.status = "processing"
+        doc.error_message = None
+        await db.commit()
+        await db.refresh(doc)
+        background_tasks.add_task(process_document_background, doc.id)
 
     return DocumentResponse(
         id=doc.id,

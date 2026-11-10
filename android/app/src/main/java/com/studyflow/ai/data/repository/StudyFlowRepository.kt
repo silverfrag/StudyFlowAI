@@ -10,6 +10,7 @@ import retrofit2.HttpException
 import java.io.InputStream
 import java.net.ConnectException
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 class StudyFlowRepository {
     private val api = RetrofitClient.apiService
@@ -17,7 +18,9 @@ class StudyFlowRepository {
     private fun extractError(e: Exception): String {
         return when (e) {
             is HttpException -> RetrofitClient.parseError(e.response()?.errorBody()?.string())
-            is ConnectException, is SocketTimeoutException ->
+            is SocketTimeoutException ->
+                "Yêu cầu xử lý quá thời gian chờ (${BuildConfig.API_BASE_URL}). Dịch vụ AI phản hồi chậm, vui lòng thử lại."
+            is ConnectException, is UnknownHostException ->
                 "Không thể kết nối tới Backend (${BuildConfig.API_BASE_URL}). Hãy đảm bảo Docker Postgres và uvicorn đang chạy."
             else -> e.localizedMessage ?: "Không thể kết nối đến máy chủ."
         }
