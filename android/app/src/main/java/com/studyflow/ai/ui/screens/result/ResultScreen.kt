@@ -1,11 +1,13 @@
 package com.studyflow.ai.ui.screens.result
 
 import android.content.res.Configuration
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material3.*
@@ -29,7 +31,8 @@ fun ResultScreen(
     result: QuizSubmitResponse?,
     onNavigateToHome: () -> Unit,
     onNavigateToProgress: () -> Unit,
-    onNavigateToCourseDetail: (() -> Unit)? = null
+    onNavigateToCourseDetail: (() -> Unit)? = null,
+    onOpenCitationDocument: (documentId: String, page: Int, title: String, suggestedPages: List<Int>, topic: String) -> Unit = { _, _, _, _, _ -> }
 ) {
     val semanticColors = studyFlowSemanticColors()
     Scaffold(
@@ -173,6 +176,23 @@ fun ResultScreen(
 
                 if (adviceText != null) {
                     val hasMistakes = result.incorrectCount > 0
+                    val firstMissedCite = if (hasMistakes) {
+                        result.details
+                            .filter { !it.isCorrect }
+                            .mapNotNull { it.citation }
+                            .firstOrNull { !it.documentId.isNullOrBlank() }
+                    } else {
+                        null
+                    }
+                    val missedDocPages = if (firstMissedCite?.documentId != null) {
+                        result.details
+                            .filter { !it.isCorrect && it.citation?.documentId == firstMissedCite.documentId }
+                            .mapNotNull { it.citation?.pageNumber }
+                            .distinct()
+                            .sorted()
+                    } else {
+                        emptyList()
+                    }
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -213,9 +233,26 @@ fun ResultScreen(
                                         onClick = onNavigateToProgress,
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Text("Mở Tiến độ & Luyện tập")
+                                        Text("Mở Tiến độ")
                                     }
-                                    if (hasMistakes && onNavigateToCourseDetail != null) {
+                                    val missedDocId = firstMissedCite?.documentId
+                                    if (missedDocId != null) {
+                                        val targetPg = missedDocPages.firstOrNull() ?: firstMissedCite.pageNumber ?: 1
+                                        OutlinedButton(
+                                            onClick = {
+                                                onOpenCitationDocument(
+                                                    missedDocId,
+                                                    targetPg,
+                                                    firstMissedCite.documentTitle,
+                                                    missedDocPages,
+                                                    weakTopics.firstOrNull()?.topic ?: ""
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Xem trang $targetPg")
+                                        }
+                                    } else if (hasMistakes && onNavigateToCourseDetail != null) {
                                         OutlinedButton(
                                             onClick = onNavigateToCourseDetail,
                                             shape = RoundedCornerShape(8.dp)
@@ -239,7 +276,19 @@ fun ResultScreen(
                 }
 
                 items(result.details) { item ->
-                    QuestionResultCard(item)
+                    QuestionResultCard(
+                        detail = item,
+                        onOpenCitation = { cite ->
+                            val docId = cite.documentId ?: return@QuestionResultCard
+                            onOpenCitationDocument(
+                                docId,
+                                cite.pageNumber ?: 1,
+                                cite.documentTitle,
+                                listOfNotNull(cite.pageNumber),
+                                ""
+                            )
+                        }
+                    )
                 }
 
                 // Nút điều hướng cuối trang (Trang chủ / Chi tiết môn / Tiến độ)
@@ -285,7 +334,10 @@ fun ResultScreen(
 }
 
 @Composable
-private fun QuestionResultCard(detail: QuestionResultDetail) {
+private fun QuestionResultCard(
+    detail: QuestionResultDetail,
+    onOpenCitation: (SourceCitation) -> Unit = {}
+) {
     val semanticColors = studyFlowSemanticColors()
     val feedbackContainer = if (detail.isCorrect) semanticColors.successContainer else semanticColors.errorContainer
     val feedbackContent = if (detail.isCorrect) semanticColors.onSuccessContainer else semanticColors.onErrorContainer
@@ -336,12 +388,33 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
                     )
                     detail.citation?.let { cite ->
                         val pageText = cite.pageNumber?.let { " (Trang $it)" } ?: ""
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Nguồn: ${cite.documentTitle}$pageText",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = feedbackContent.copy(alpha = 0.8f)
-                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        val canOpenDoc = !cite.documentId.isNullOrBlank()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = if (canOpenDoc) {
+                                Modifier.clickable { onOpenCitation(cite) }
+                            } else {
+                                Modifier
+                            }
+                        ) {
+                            Text(
+                                text = "Nguồn: ${cite.documentTitle}$pageText",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (canOpenDoc) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (canOpenDoc) MaterialTheme.colorScheme.primary else feedbackContent.copy(alpha = 0.8f),
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (canOpenDoc) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                    contentDescription = "Mở tài liệu",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

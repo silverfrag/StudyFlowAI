@@ -1,6 +1,7 @@
 package com.studyflow.ai.ui.screens.progress
 
 import android.content.res.Configuration
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -37,6 +39,7 @@ import com.studyflow.ai.ui.theme.studyFlowSemanticColors
 @Composable
 fun ProgressScreen(
     onOpenCourseDetail: (String) -> Unit,
+    onOpenDocument: (documentId: String, page: Int, title: String, suggestedPages: List<Int>, topic: String) -> Unit = { _, _, _, _, _ -> },
     onStartPracticeQuiz: (quizId: String, courseId: String) -> Unit,
     onNavigateToCourses: () -> Unit,
     viewModel: ProgressViewModel = viewModel()
@@ -208,6 +211,21 @@ fun ProgressScreen(
                                         item = item,
                                         isBusy = isStartingPractice,
                                         isThisTopicLoading = isStartingPractice && startingTopic == item.topic,
+                                        onOpenDocumentOrCourse = {
+                                            val doc = item.suggestedDocument
+                                            if (doc != null) {
+                                                val targetPage = item.suggestedPages.firstOrNull() ?: 1
+                                                onOpenDocument(
+                                                    doc.id,
+                                                    targetPage,
+                                                    doc.title,
+                                                    item.suggestedPages,
+                                                    item.topic
+                                                )
+                                            } else {
+                                                onOpenCourseDetail(item.courseId)
+                                            }
+                                        },
                                         onOpenCourse = { onOpenCourseDetail(item.courseId) },
                                         onPracticeClick = {
                                             viewModel.startPracticeQuiz(item.courseId, item.topic) { quiz ->
@@ -230,6 +248,7 @@ private fun RecommendationCard(
     item: RecommendationItem,
     isBusy: Boolean,
     isThisTopicLoading: Boolean = false,
+    onOpenDocumentOrCourse: () -> Unit,
     onOpenCourse: () -> Unit,
     onPracticeClick: () -> Unit
 ) {
@@ -255,7 +274,8 @@ private fun RecommendationCard(
                     Text(
                         text = item.courseName,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable(onClick = onOpenCourse)
                     )
                 }
                 Surface(
@@ -287,11 +307,19 @@ private fun RecommendationCard(
             )
 
             item.suggestedDocument?.let { doc ->
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                val pageSuffix = if (item.suggestedPages.isNotEmpty()) {
+                    " • Trang ${item.suggestedPages.take(3).joinToString(", ")}"
+                } else {
+                    ""
+                }
                 Text(
-                    text = "Tài liệu gợi ý: ${doc.title}",
+                    text = "Tài liệu gợi ý: ${doc.title}$pageSuffix",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable(onClick = onOpenDocumentOrCourse)
                 )
             }
 
@@ -300,12 +328,18 @@ private fun RecommendationCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                val primaryTargetPage = item.suggestedPages.firstOrNull()
+                val viewButtonLabel = if (item.suggestedDocument != null && primaryTargetPage != null) {
+                    "Xem trang $primaryTargetPage"
+                } else {
+                    "Xem tài liệu"
+                }
                 OutlinedButton(
-                    onClick = onOpenCourse,
+                    onClick = onOpenDocumentOrCourse,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Xem tài liệu")
+                    Text(viewButtonLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Button(
                     onClick = onPracticeClick,
@@ -322,7 +356,7 @@ private fun RecommendationCard(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Đang tạo...")
                     } else {
-                        Text("Luyện quiz")
+                        Text("Luyện quiz", maxLines = 1)
                     }
                 }
             }
@@ -345,9 +379,11 @@ private fun RecommendationCardPreview() {
                     correctCount = 2,
                     accuracy = 0.33,
                     recommendedAction = "Ôn lại lý thuyết phép nối và làm quiz luyện tập củng cố.",
-                    suggestedDocument = SuggestedDocument("d1", "Giao_trinh_CSDL_Chuong2.pdf")
+                    suggestedDocument = SuggestedDocument("d1", "Giao_trinh_CSDL_Chuong2.pdf"),
+                    suggestedPages = listOf(8, 12)
                 ),
                 isBusy = false,
+                onOpenDocumentOrCourse = {},
                 onOpenCourse = {},
                 onPracticeClick = {}
             )

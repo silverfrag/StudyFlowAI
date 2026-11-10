@@ -20,7 +20,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.main import app
-from app.models.document import Document
+from app.models.document import Document, DocumentChunk
 from app.schemas.assistant import ChatHistoryMessage
 from app.services import (
     document_service,
@@ -275,6 +275,31 @@ class PureBackendUnitTests(unittest.TestCase):
         self.assertIn("    if x > 0:", cleaned)
         self.assertNotIn("\n---\n", cleaned)
 
+    def test_quiz_filler_filtering_helper(self):
+        filler_short = DocumentChunk(
+            document_id=uuid4(),
+            course_id=uuid4(),
+            page_number=1,
+            ordinal=0,
+            text="Chương 2",
+        )
+        filler_thanks = DocumentChunk(
+            document_id=uuid4(),
+            course_id=uuid4(),
+            page_number=40,
+            ordinal=39,
+            text="Cảm ơn các bạn đã lắng nghe! Q&A",
+        )
+        substantive = DocumentChunk(
+            document_id=uuid4(),
+            course_id=uuid4(),
+            page_number=12,
+            ordinal=11,
+            text="Quy trình kiểm thử phần mềm STLC gồm lập kế hoạch, phân tích yêu cầu, thiết kế test case và báo cáo lỗi.",
+        )
+        filtered = [c for c in (filler_short, filler_thanks, substantive) if not rag_service._is_filler_slide(c.text)]
+        self.assertEqual([c.page_number for c in filtered], [12])
+
 
 class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -388,6 +413,17 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status_res.status_code, 200)
             self.assertEqual(status_res.json()["status"], "ready")
             self.assertEqual(len(os.listdir(self.tmp_storage.name)), 1)
+
+            # Kiểm tra endpoint stream/download file tài liệu gốc cho in-app viewer
+            file_res = await client.get(f"/api/v1/documents/{doc_id}/file")
+            self.assertEqual(file_res.status_code, 200)
+            self.assertTrue(file_res.headers["content-type"].startswith("application/pdf"))
+            self.assertIn("inline", file_res.headers.get("content-disposition", "").lower())
+            self.assertEqual(file_res.content, pdf_bytes)
+
+            missing_doc_res = await client.get(f"/api/v1/documents/{uuid4()}/file")
+            self.assertEqual(missing_doc_res.status_code, 404)
+            self.assertEqual(missing_doc_res.json()["detail"]["code"], "RESOURCE_NOT_FOUND")
 
             # 5. RAG hỏi đáp có trích dẫn nguồn thật & lọc bỏ index bịa ([99])
             mock_rag_output = rag_service._RagLLMOutput(
@@ -532,6 +568,7 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(submit_body["incorrect_count"], 2)
             self.assertIsNotNone(submit_body["study_advice"])
             self.assertIn("Chuong1_CSDL.pdf", submit_body["study_advice"])
+            self.assertEqual(submit_body["details"][0]["citation"]["document_id"], doc_id)
             self.assertEqual(submit_body["details"][0]["citation"]["document_title"], "Chuong1_CSDL.pdf")
             self.assertEqual(submit_body["details"][0]["citation"]["page_number"], 1)
             self.assertIsNone(submit_body["details"][2]["selected_option_id"])
@@ -567,6 +604,7 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(weak_items[0]["correct_count"], 1)
             self.assertAlmostEqual(weak_items[0]["accuracy"], 0.33, places=2)
             self.assertEqual(weak_items[0]["suggested_document"]["id"], doc_id)
+            self.assertEqual(weak_items[0]["suggested_pages"], [1])
             self.assertIn("Gợi ý cá nhân hóa", weak_items[0]["recommended_action"])
 
             # 8. Xóa môn học -> phải xóa cả file vật lý trong storage
@@ -602,12 +640,20 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(st2_after.json()["status"], "ready")
                 self.assertIsNone(st2_after.json()["error_message"])
 
-                # Nếu file gốc trên đĩa bị mất, retry phải báo 400 VALIDATION_ERROR rõ ràng
+                txt_file_res = await client.get(f"/api/v1/documents/{doc2_id}/file")
+                self.assertEqual(txt_file_res.status_code, 200)
+                self.assertTrue(txt_file_res.headers["content-type"].startswith("text/plain"))
+                self.assertEqual(txt_file_res.text, "Du lieu test khong co key")
+
+                # Nếu file gốc trên đĩa bị mất, retry phải báo 400 VALIDATION_ERROR rõ ràng và /file phải trả 404
                 for name in os.listdir(self.tmp_storage.name):
                     os.remove(os.path.join(self.tmp_storage.name, name))
                 retry_missing = await client.post(f"/api/v1/documents/{doc2_id}/retry")
                 self.assertEqual(retry_missing.status_code, 400)
                 self.assertEqual(retry_missing.json()["detail"]["code"], "VALIDATION_ERROR")
+                missing_disk_res = await client.get(f"/api/v1/documents/{doc2_id}/file")
+                self.assertEqual(missing_disk_res.status_code, 404)
+                self.assertEqual(missing_disk_res.json()["detail"]["code"], "RESOURCE_NOT_FOUND")
 
     async def test_gemini_structured_json_fallback_on_timeout(self):
         class _DummyInteraction:

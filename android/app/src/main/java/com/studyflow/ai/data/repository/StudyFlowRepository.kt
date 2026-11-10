@@ -3,14 +3,25 @@ package com.studyflow.ai.data.repository
 import com.studyflow.ai.BuildConfig
 import com.studyflow.ai.data.api.RetrofitClient
 import com.studyflow.ai.data.model.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+
+data class DownloadedDocument(
+    val file: File,
+    val mimeType: String,
+    val isPdf: Boolean
+)
 
 class StudyFlowRepository {
     private val api = RetrofitClient.apiService
@@ -106,6 +117,85 @@ class StudyFlowRepository {
         Result.success(api.retryDocument(documentId))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun downloadDocumentToCache(
+        cacheDir: File,
+        documentId: String,
+        titleHint: String? = null,
+        forceRefresh: Boolean = false
+    ): Result<DownloadedDocument> = withContext(Dispatchers.IO) {
+        try {
+            val safeId = documentId.replace(Regex("[^A-Za-z0-9_-]"), "")
+            if (safeId.isBlank()) {
+                return@withContext Result.failure(Exception("Mã tài liệu không hợp lệ."))
+            }
+            val viewerDir = File(cacheDir, "doc_viewer").apply { mkdirs() }
+            val cachedPdf = File(viewerDir, "$safeId.pdf")
+            val cachedTxt = File(viewerDir, "$safeId.txt")
+
+            if (!forceRefresh) {
+                if (cachedPdf.exists() && cachedPdf.length() > 8 && hasPdfSignature(cachedPdf)) {
+                    return@withContext Result.success(
+                        DownloadedDocument(cachedPdf, "application/pdf", isPdf = true)
+                    )
+                }
+                if (cachedTxt.exists() && cachedTxt.length() > 0) {
+                    return@withContext Result.success(
+                        DownloadedDocument(cachedTxt, "text/plain", isPdf = false)
+                    )
+                }
+            }
+
+            val response = api.downloadDocumentFile(documentId)
+            if (!response.isSuccessful) {
+                val msg = RetrofitClient.parseError(response.errorBody()?.string())
+                return@withContext Result.failure(Exception(msg))
+            }
+            val body = response.body()
+                ?: return@withContext Result.failure(Exception("Máy chủ không trả về nội dung tài liệu."))
+
+            val contentType = response.headers()["Content-Type"]?.substringBefore(';')?.trim()?.lowercase()
+            val tmpFile = File(viewerDir, "$safeId.tmp")
+            if (tmpFile.exists()) tmpFile.delete()
+
+            body.byteStream().use { input ->
+                FileOutputStream(tmpFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            if (tmpFile.length() == 0L) {
+                tmpFile.delete()
+                return@withContext Result.failure(Exception("Tệp tài liệu tải về bị rỗng."))
+            }
+
+            val looksLikePdf = hasPdfSignature(tmpFile) ||
+                (contentType == "application/pdf") ||
+                (titleHint?.lowercase()?.endsWith(".pdf") == true && contentType != "text/plain")
+            val ext = if (looksLikePdf) "pdf" else "txt"
+            val mimeType = if (looksLikePdf) "application/pdf" else "text/plain"
+            val finalFile = File(viewerDir, "$safeId.$ext")
+            if (finalFile.exists()) finalFile.delete()
+            if (!tmpFile.renameTo(finalFile)) {
+                tmpFile.copyTo(finalFile, overwrite = true)
+                tmpFile.delete()
+            }
+
+            Result.success(DownloadedDocument(finalFile, mimeType, isPdf = looksLikePdf))
+        } catch (e: Exception) {
+            Result.failure(Exception(extractError(e)))
+        }
+    }
+
+    private fun hasPdfSignature(file: File): Boolean {
+        return try {
+            val buffer = ByteArray(1024)
+            val read = FileInputStream(file).use { it.read(buffer) }
+            if (read <= 0) false else String(buffer, 0, read, Charsets.ISO_8859_1).contains("%PDF-")
+        } catch (_: Exception) {
+            false
+        }
     }
 
     suspend fun askAssistant(

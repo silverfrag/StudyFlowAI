@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -46,6 +47,7 @@ import kotlinx.coroutines.delay
 fun AssistantScreen(
     preferredCourseId: String? = null,
     onNavigateToCourses: () -> Unit,
+    onOpenCitationDocument: (documentId: String, page: Int, title: String) -> Unit = { _, _, _ -> },
     viewModel: AssistantViewModel = viewModel()
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -282,6 +284,13 @@ fun AssistantScreen(
                                         msg.retryQuestion?.let { q ->
                                             viewModel.retryQuestion(msg.id, q)
                                         }
+                                    },
+                                    onOpenCitation = { cite ->
+                                        onOpenCitationDocument(
+                                            cite.documentId,
+                                            cite.pageNumber ?: 1,
+                                            cite.documentTitle
+                                        )
                                     }
                                 )
                             }
@@ -380,7 +389,8 @@ fun AssistantScreen(
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
-    onRetry: (() -> Unit)? = null
+    onRetry: (() -> Unit)? = null,
+    onOpenCitation: ((Citation) -> Unit)? = null
 ) {
     val align = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = when {
@@ -553,6 +563,34 @@ private fun ChatBubble(
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.weight(1f)
                                         )
+                                        if (onOpenCitation != null) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                modifier = Modifier
+                                                    .padding(horizontal = 6.dp)
+                                                    .clickable { onOpenCitation(cite) }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = cite.pageNumber?.let { "Mở tr.$it" } ?: "Mở",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = primaryColor
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                                        contentDescription = "Mở tài liệu",
+                                                        tint = primaryColor,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
                                         Icon(
                                             imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                                             contentDescription = if (expanded) "Thu gọn" else "Xem thêm",

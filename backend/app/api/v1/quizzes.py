@@ -92,15 +92,15 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
 
     # Truy vấn thông tin nguồn thật từ DocumentChunk & Document cho từng câu hỏi
     chunk_ids = [q.source_chunk_id for q in questions if q.source_chunk_id is not None]
-    citation_map: Dict[UUID, Tuple[str, Optional[int]]] = {}
+    citation_map: Dict[UUID, Tuple[UUID, str, Optional[int]]] = {}
     if chunk_ids:
         cite_res = await db.execute(
-            select(DocumentChunk.id, Document.title, DocumentChunk.page_number)
+            select(DocumentChunk.id, Document.id, Document.title, DocumentChunk.page_number)
             .join(Document, DocumentChunk.document_id == Document.id)
             .where(DocumentChunk.id.in_(chunk_ids))
         )
-        for c_id, doc_title, page_num in cite_res.all():
-            citation_map[c_id] = (doc_title, page_num)
+        for c_id, doc_id, doc_title, page_num in cite_res.all():
+            citation_map[c_id] = (doc_id, doc_title, page_num)
 
     # Map submission theo question_id
     answers_map = {ans.question_id: ans.selected_option_id for ans in payload.answers}
@@ -133,8 +133,8 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
                     "topic": topic_map[topic_group_key]["display"],
                     "prompt": q.prompt,
                     "explanation": q.explanation,
-                    "doc_title": source_info[0] if source_info else None,
-                    "page_number": source_info[1] if source_info else None,
+                    "doc_title": source_info[1] if source_info else None,
+                    "page_number": source_info[2] if source_info else None,
                 }
             )
 
@@ -147,7 +147,11 @@ async def submit_quiz(quiz_id: UUID, payload: QuizSubmitRequest, db: AsyncSessio
                 is_correct=is_correct,
                 explanation=q.explanation,
                 citation=(
-                    SourceCitation(document_title=source_info[0], page_number=source_info[1])
+                    SourceCitation(
+                        document_id=source_info[0],
+                        document_title=source_info[1],
+                        page_number=source_info[2],
+                    )
                     if source_info
                     else None
                 ),

@@ -82,6 +82,34 @@ fun CoursesScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (!showCreateDialog && courseToEdit == null && !actionError.isNullOrBlank()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = actionError ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { viewModel.clearError() }) {
+                            Text("Đóng")
+                        }
+                    }
+                }
+            }
             when (val state = uiState) {
                 is CoursesUiState.Loading -> LoadingStateView("Đang tải danh sách môn học...")
                 is CoursesUiState.Error -> ErrorStateView(state.message) { viewModel.loadCourses() }
@@ -316,8 +344,8 @@ private fun CourseFormDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, String?) -> Unit
 ) {
-    var name by remember { mutableStateOf(initialName) }
-    var description by remember { mutableStateOf(initialDescription) }
+    var name by remember(initialName, initialDescription) { mutableStateOf(initialName) }
+    var description by remember(initialName, initialDescription) { mutableStateOf(initialDescription) }
 
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },

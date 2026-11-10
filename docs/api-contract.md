@@ -201,6 +201,13 @@ Polling kiểm tra tiến độ xử lý tài liệu.
 }
 ```
 
+#### `GET /api/v1/documents/{document_id}/file`
+Tải hoặc stream tệp tài liệu gốc (`.pdf` / `.txt`) để mở đọc trực tiếp trong ứng dụng (Android PDF/TXT Viewer) hoặc mở qua ứng dụng ngoài.
+- **Response:** `200 OK`
+  - **Content-Type:** `application/pdf` hoặc `text/plain`
+  - **Content-Disposition:** `inline; filename="<tên tài liệu>"`
+  - **Lỗi:** `404 RESOURCE_NOT_FOUND` nếu tài liệu không tồn tại hoặc tệp gốc không còn trên máy chủ.
+
 #### `POST /api/v1/documents/{document_id}/retry`
 Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` hoặc bản ghi `processing` bị mồ côi do gián đoạn tác vụ nền nếu file gốc vẫn còn trên server (idempotent nếu tài liệu đang được worker xử lý).
 - **Response:** `202 Accepted` (Trả về Document Object với `status: "processing"`, `error_message: null`; trả `400 VALIDATION_ERROR` nếu file gốc không còn tồn tại trên storage).
@@ -420,6 +427,7 @@ Người học trả lời:
       "is_correct": true,
       "explanation": "Theo quy tắc toàn vẹn thực thể, khóa chính không bao giờ được phép mang giá trị NULL.",
       "citation": {
+        "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
         "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
         "page_number": 12
       }
@@ -432,6 +440,7 @@ Người học trả lời:
       "is_correct": false,
       "explanation": "Mỗi quan hệ chỉ có duy nhất một khóa chính, dù khóa chính đó có thể gồm nhiều thuộc tính kết hợp (composite key).",
       "citation": {
+        "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
         "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
         "page_number": 15
       }
@@ -444,6 +453,7 @@ Người học trả lời:
       "is_correct": false,
       "explanation": "Khóa ngoại dùng để thể hiện mối quan hệ giữa các bảng và đảm bảo tính toàn vẹn tham chiếu.",
       "citation": {
+        "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
         "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
         "page_number": 20
       }
@@ -491,7 +501,8 @@ Lấy danh sách topic yếu (sắp xếp tỷ lệ đúng thấp nhất trướ
     "suggested_document": {
       "id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
       "title": "Giao_trinh_CSDL_Chuong2_JOIN.pdf"
-    }
+    },
+    "suggested_pages": [8]
   }
 ]
 ```

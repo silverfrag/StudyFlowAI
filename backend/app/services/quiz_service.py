@@ -17,10 +17,11 @@ from app.schemas.quiz import (
 )
 from app.services.document_service import EMBEDDING_DIMENSIONS
 from app.services.gemini_service import AIServiceError, embed_texts, generate_structured_json
+from app.services.rag_service import _find_mentioned_doc_ids, _is_filler_slide
 from app.services.recommendation_service import canonicalize_topic_display, normalize_topic_group_key
 
 CANONICAL_OPTION_IDS = ("A", "B", "C", "D")
-MAX_CONTEXT_CHUNKS_FOR_QUIZ = 8
+MAX_CONTEXT_CHUNKS_FOR_QUIZ = 12
 
 QUIZ_SYSTEM_INSTRUCTION = (
     "Bạn là chuyên gia ra đề trắc nghiệm học thuật cho ứng dụng StudyFlow AI.\n"
@@ -34,7 +35,8 @@ QUIZ_SYSTEM_INSTRUCTION = (
     "   - Nếu người dùng đã chỉ định 'Chủ đề trọng tâm yêu cầu', hãy gán ĐÚNG tên chủ đề đó cho toàn bộ câu hỏi trong bài quiz để theo dõi tiến độ ôn tập chính xác.\n"
     "   - Nếu là bài kiểm tra tổng hợp (không chỉ định chủ đề trọng tâm), TUYỆT ĐỐI KHÔNG đặt mỗi câu một topic khác nhau; "
     "hãy gom các câu hỏi vào CHỈ 2–3 chủ đề kiến thức lớn (mỗi chủ đề có ít nhất 2 câu khi số câu >= 4) và ưu tiên tái sử dụng đúng tên chủ đề đã có của môn học nếu cùng nội dung.\n"
-    "5. Điền giải thích ngắn gọn (explanation) và chỉ số đoạn [ĐOẠN i] (source_chunk_index) làm căn cứ; nếu không gắn một đoạn cụ thể thì đặt -1."
+    "5. Điền giải thích ngắn gọn (explanation) và chỉ số đoạn [ĐOẠN i] (source_chunk_index) làm căn cứ; nếu không gắn một đoạn cụ thể thì đặt -1.\n"
+    "6. Không viết cú pháp LaTeX ($...$, \\text{...}); dùng ký tự Unicode hoặc văn bản thuần dễ đọc trên di động."
 )
 
 
@@ -75,7 +77,14 @@ async def _select_quiz_chunks(
 
     cleaned_topic = (topic or "").strip()
     if cleaned_topic:
-        # Nếu có chủ đề trọng tâm và chunks có embedding, ưu tiên lấy theo cosine distance
+        mentioned_doc_ids = set()
+        if document_id is None:
+            docs_res = await db.execute(
+                select(Document).where(Document.course_id == course_id, Document.status == "ready")
+            )
+            mentioned_doc_ids = _find_mentioned_doc_ids(cleaned_topic, list(docs_res.scalars().all()))
+
+        # Nếu có chủ đề trọng tâm và chunks có embedding, ưu tiên lấy theo cosine distance + lọc slide rỗng
         embedded_stmt = base_stmt.where(DocumentChunk.embedding.is_not(None))
         check_emb = await db.execute(embedded_stmt.limit(1))
         if check_emb.scalar_one_or_none() is not None:
@@ -86,24 +95,30 @@ async def _select_quiz_chunks(
             )
             ranked_stmt = (
                 embedded_stmt.order_by(DocumentChunk.embedding.cosine_distance(query_vecs[0]))
-                .limit(MAX_CONTEXT_CHUNKS_FOR_QUIZ)
+                .limit(MAX_CONTEXT_CHUNKS_FOR_QUIZ * 2)
             )
             res = await db.execute(ranked_stmt)
             rows = list(res.all())
-            if rows:
-                return rows
+            substantive = [r for r in rows if not _is_filler_slide(r[0].text)] or rows
+            if mentioned_doc_ids:
+                prioritized = [r for r in substantive if r[0].document_id in mentioned_doc_ids]
+                remainder = [r for r in substantive if r[0].document_id not in mentioned_doc_ids]
+                substantive = prioritized + remainder
+            if substantive:
+                return substantive[:MAX_CONTEXT_CHUNKS_FOR_QUIZ]
 
     all_stmt = base_stmt.order_by(Document.created_at.asc(), DocumentChunk.ordinal.asc())
     res = await db.execute(all_stmt)
     all_rows = list(res.all())
-    if len(all_rows) <= MAX_CONTEXT_CHUNKS_FOR_QUIZ:
-        return all_rows
+    substantive_rows = [r for r in all_rows if not _is_filler_slide(r[0].text)] or all_rows
+    if len(substantive_rows) <= MAX_CONTEXT_CHUNKS_FOR_QUIZ:
+        return substantive_rows
 
-    # Lấy mẫu rải đều xuyên suốt tài liệu để bao quát kiến thức
+    # Lấy mẫu rải đều xuyên suốt các đoạn có nội dung thực chất để bao quát kiến thức
     sampled: List[Tuple[DocumentChunk, str]] = []
-    step = len(all_rows) / float(MAX_CONTEXT_CHUNKS_FOR_QUIZ)
+    step = len(substantive_rows) / float(MAX_CONTEXT_CHUNKS_FOR_QUIZ)
     for i in range(MAX_CONTEXT_CHUNKS_FOR_QUIZ):
-        sampled.append(all_rows[int(i * step)])
+        sampled.append(substantive_rows[int(i * step)])
     return sampled
 
 

@@ -198,7 +198,11 @@ class ApiContractParsingTest {
                   "correct_option_id": "B",
                   "is_correct": false,
                   "explanation": "Khóa ngoại đảm bảo toàn vẹn tham chiếu.",
-                  "citation": { "document_title": "Giao_trinh_CSDL_Chuong1.pdf", "page_number": 20 }
+                  "citation": {
+                    "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
+                    "document_title": "Giao_trinh_CSDL_Chuong1.pdf",
+                    "page_number": 20
+                  }
                 }
               ]
             }
@@ -211,6 +215,7 @@ class ApiContractParsingTest {
         assertNull(submitRes.details[0].selectedOptionId)
         assertEquals("B", submitRes.details[0].correctOptionId)
         assertNotNull(submitRes.details[0].citation)
+        assertEquals("d3a2e104-5555-4666-8777-1a2b3c4d5e6f", submitRes.details[0].citation?.documentId)
     }
 
     @Test
@@ -247,7 +252,8 @@ class ApiContractParsingTest {
                 "suggested_document": {
                   "id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
                   "title": "Giao_trinh_CSDL_Chuong2_JOIN.pdf"
-                }
+                },
+                "suggested_pages": [8, 12]
               }
             ]
         """.trimIndent()
@@ -256,6 +262,7 @@ class ApiContractParsingTest {
         assertEquals(1, recs.size)
         assertEquals(0.33, recs[0].accuracy, 0.001)
         assertEquals("Giao_trinh_CSDL_Chuong2_JOIN.pdf", recs[0].suggestedDocument?.title)
+        assertEquals(listOf(8, 12), recs[0].suggestedPages)
     }
 
     @Test

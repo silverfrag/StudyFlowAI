@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from typing import Optional, List
 
@@ -34,4 +34,5 @@ class RecommendationItem(BaseModel):
     accuracy: float
     recommended_action: str
     suggested_document: Optional[SuggestedDocument] = None
+    suggested_pages: List[int] = Field(default_factory=list)
 

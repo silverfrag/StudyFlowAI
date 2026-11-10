@@ -410,6 +410,7 @@ async def build_recommendations(db: AsyncSession) -> List[RecommendationItem]:
                 accuracy=cand.accuracy,
                 recommended_action=action_text,
                 suggested_document=cand.suggested_doc,
+                suggested_pages=cand.pages[:6],
             )
         )
 

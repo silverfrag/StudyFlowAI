@@ -1,5 +1,6 @@
 package com.studyflow.ai.ui.navigation
 
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
@@ -22,6 +23,21 @@ import com.studyflow.ai.ui.screens.home.HomeScreen
 import com.studyflow.ai.ui.screens.progress.ProgressScreen
 import com.studyflow.ai.ui.screens.quiz.QuizScreen
 import com.studyflow.ai.ui.screens.result.ResultScreen
+import com.studyflow.ai.ui.screens.viewer.DocumentViewerScreen
+
+private fun buildDocumentViewerRoute(
+    documentId: String,
+    page: Int = 1,
+    title: String = "",
+    suggestedPages: List<Int> = emptyList(),
+    topic: String = ""
+): String {
+    val safePage = page.coerceAtLeast(1)
+    val encodedTitle = Uri.encode(title)
+    val pagesCsv = suggestedPages.filter { it >= 1 }.distinct().joinToString(",")
+    val encodedTopic = Uri.encode(topic)
+    return "document_viewer/$documentId?page=$safePage&title=$encodedTitle&pages=$pagesCsv&topic=$encodedTopic"
+}
 
 sealed class BottomNavTab(val route: String, val label: String, val icon: ImageVector) {
     data object Home : BottomNavTab("home", "Trang chủ", Icons.Outlined.Home)
@@ -130,6 +146,16 @@ fun StudyFlowApp() {
                             launchSingleTop = true
                             restoreState = true
                         }
+                    },
+                    onOpenCitationDocument = { docId, page, title ->
+                        navController.navigate(
+                            buildDocumentViewerRoute(
+                                documentId = docId,
+                                page = page,
+                                title = title,
+                                suggestedPages = listOf(page)
+                            )
+                        )
                     }
                 )
             }
@@ -138,6 +164,17 @@ fun StudyFlowApp() {
                 ProgressScreen(
                     onOpenCourseDetail = { courseId ->
                         navController.navigate("course_detail/$courseId")
+                    },
+                    onOpenDocument = { docId, page, title, pages, topic ->
+                        navController.navigate(
+                            buildDocumentViewerRoute(
+                                documentId = docId,
+                                page = page,
+                                title = title,
+                                suggestedPages = pages,
+                                topic = topic
+                            )
+                        )
                     },
                     onStartPracticeQuiz = { quizId, courseId ->
                         latestQuizCourseId = courseId
@@ -171,6 +208,15 @@ fun StudyFlowApp() {
                     onStartQuiz = { quizId ->
                         latestQuizCourseId = courseId
                         navController.navigate("quiz/$quizId")
+                    },
+                    onOpenDocument = { docId, title ->
+                        navController.navigate(
+                            buildDocumentViewerRoute(
+                                documentId = docId,
+                                page = 1,
+                                title = title
+                            )
+                        )
                     }
                 )
             }
@@ -197,25 +243,76 @@ fun StudyFlowApp() {
                 ResultScreen(
                     result = latestQuizResult,
                     onNavigateToHome = {
-                        navController.navigate(BottomNavTab.Home.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
-                            launchSingleTop = true
+                        val popped = navController.popBackStack(BottomNavTab.Home.route, inclusive = false)
+                        if (!popped) {
+                            navController.navigate(BottomNavTab.Home.route) {
+                                launchSingleTop = true
+                            }
                         }
                     },
                     onNavigateToProgress = {
-                        navController.navigate(BottomNavTab.Progress.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
-                            launchSingleTop = true
+                        val popped = navController.popBackStack(BottomNavTab.Progress.route, inclusive = false)
+                        if (!popped) {
+                            navController.navigate(BottomNavTab.Progress.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                                launchSingleTop = true
+                            }
                         }
                     },
                     onNavigateToCourseDetail = courseIdForBack?.let { cid ->
                         {
-                            navController.navigate("course_detail/$cid") {
-                                popUpTo("quiz_result") { inclusive = true }
-                                launchSingleTop = true
+                            val popped = navController.popBackStack("course_detail/$cid", inclusive = false)
+                            if (!popped) {
+                                navController.navigate("course_detail/$cid") {
+                                    popUpTo("quiz_result") { inclusive = true }
+                                    launchSingleTop = true
+                                }
                             }
                         }
+                    },
+                    onOpenCitationDocument = { docId, page, title, pages, topic ->
+                        navController.navigate(
+                            buildDocumentViewerRoute(
+                                documentId = docId,
+                                page = page,
+                                title = title,
+                                suggestedPages = pages,
+                                topic = topic
+                            )
+                        )
                     }
+                )
+            }
+
+            composable(
+                route = "document_viewer/{documentId}?page={page}&title={title}&pages={pages}&topic={topic}",
+                arguments = listOf(
+                    navArgument("documentId") { type = NavType.StringType },
+                    navArgument("page") { type = NavType.IntType; defaultValue = 1 },
+                    navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("pages") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("topic") { type = NavType.StringType; defaultValue = "" }
+                )
+            ) { backStackEntry ->
+                val documentId = backStackEntry.arguments?.getString("documentId") ?: return@composable
+                val initialPage = (backStackEntry.arguments?.getInt("page") ?: 1).coerceAtLeast(1)
+                val title = backStackEntry.arguments?.getString("title").orEmpty()
+                val pagesRaw = backStackEntry.arguments?.getString("pages").orEmpty()
+                val topic = backStackEntry.arguments?.getString("topic").orEmpty()
+                val parsedPages = remember(pagesRaw) {
+                    pagesRaw.split(",")
+                        .mapNotNull { it.trim().toIntOrNull() }
+                        .filter { it >= 1 }
+                        .distinct()
+                        .sorted()
+                }
+                DocumentViewerScreen(
+                    documentId = documentId,
+                    initialPage = initialPage,
+                    documentTitle = title,
+                    suggestedPages = parsedPages,
+                    focusTopic = topic,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

@@ -16,7 +16,7 @@ Mục tiêu là hoàn thành MVP Android trong 2 tuần với một luồng end-
 Không dùng Supabase hoặc NestJS; không tách thêm backend/service cho MVP. Android không gọi Gemini trực tiếp.
 
 ## 2. Thành phần và trách nhiệm
-1. **Android app:** Compose UI, ViewModel/state theo màn hình, repository và DTO cho API; quản lý luồng môn học, tài liệu, trợ lý học tập, quiz và tiến độ.
+1. **Android app:** Compose UI, ViewModel/state theo màn hình, repository và DTO cho API; quản lý luồng môn học, tài liệu (kèm trình xem PDF/TXT tích hợp mở thẳng tới trang gợi ý/trích dẫn), trợ lý học tập, quiz và tiến độ.
 2. **FastAPI backend:** API, xác thực/kiểm tra input, nghiệp vụ môn học/tài liệu/quiz/kết quả, upload và xử lý tài liệu, truy xuất RAG, gọi Gemini, xác thực đầu ra model.
 3. **PostgreSQL + pgvector:** dữ liệu nghiệp vụ, chunks, embeddings, quiz và kết quả; dùng vector search khi tạo embedding tương thích. Schema và migration được quản lý trong repo.
 4. **Local/server file storage:** file PDF/TXT gốc. Backend sinh tên lưu trữ, kiểm tra loại/kích thước, kiểm soát quyền truy cập và giữ storage reference trong DB.
@@ -70,7 +70,7 @@ Tổng hợp `correct_count / answered_count` theo topic từ kết quả đã l
 Danh sách dưới đây là phạm vi khái niệm để chia việc; trước khi triển khai phải thống nhất path, field, validation, status/error và schema JSON chi tiết. Thay đổi phải được thống nhất trước và cập nhật tài liệu cùng PR.
 
 - `GET/POST/PATCH/DELETE /courses`
-- `GET/POST/DELETE /courses/{courseId}/documents` & `POST /documents/{documentId}/retry` (upload multipart; trả trạng thái xử lý; cho phép thử xử lý lại khi lỗi)
+- `GET/POST/DELETE /courses/{courseId}/documents`, `GET /documents/{documentId}/file` & `POST /documents/{documentId}/retry` (upload multipart; trả trạng thái xử lý; tải/stream tệp gốc cho trình xem tài liệu; cho phép thử xử lý lại khi lỗi)
 - `POST /assistant/ask` (question + course/document context → answer + citations)
 - `GET /courses/{courseId}/quizzes` & `POST /quizzes` (liệt kê quiz theo môn; course/topic/count → validated quiz)
 - `POST /quizzes/{quizId}/submit` (answers → deterministic result)

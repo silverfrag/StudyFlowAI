@@ -62,6 +62,7 @@ class TopicStat(BaseModel):
 
 
 class SourceCitation(BaseModel):
+    document_id: Optional[UUID] = None
     document_title: str
     page_number: Optional[int] = None
 

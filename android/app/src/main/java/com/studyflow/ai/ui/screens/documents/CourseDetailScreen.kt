@@ -42,6 +42,7 @@ fun CourseDetailScreen(
     onBack: () -> Unit,
     onOpenAssistantForCourse: (String) -> Unit,
     onStartQuiz: (String) -> Unit,
+    onOpenDocument: (documentId: String, title: String) -> Unit = { _, _ -> },
     viewModel: CourseDetailViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -296,6 +297,7 @@ fun CourseDetailScreen(
                                 DocumentCard(
                                     doc = doc,
                                     isStaleProcessing = isStaleProcessing,
+                                    onOpenClick = { onOpenDocument(doc.id, doc.title) },
                                     onRetryProcessClick = if (canRetryDoc) {
                                         { viewModel.retryDocument(courseId, doc.id) }
                                     } else null,
@@ -434,6 +436,7 @@ fun CourseDetailScreen(
 private fun DocumentCard(
     doc: DocumentResponse,
     isStaleProcessing: Boolean = false,
+    onOpenClick: () -> Unit = {},
     onRetryProcessClick: (() -> Unit)? = null,
     onDeleteClick: () -> Unit
 ) {
@@ -449,6 +452,7 @@ private fun DocumentCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
+        onClick = onOpenClick,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {

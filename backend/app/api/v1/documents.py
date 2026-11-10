@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -160,6 +161,46 @@ async def get_document_status(document_id: UUID, db: AsyncSession = Depends(get_
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy tài liệu."},
         )
     return DocumentStatusResponse(id=doc.id, status=doc.status, error_message=doc.error_message)
+
+
+@router.get("/documents/{document_id}/file")
+async def download_document_file(document_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Stream tệp tài liệu gốc (PDF/TXT) để mở đọc trực tiếp trong app."""
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy tài liệu."},
+        )
+
+    if not doc.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Tệp tài liệu gốc không tồn tại trên máy chủ."},
+        )
+
+    storage_root = os.path.realpath(settings.STORAGE_DIR)
+    target_path = os.path.realpath(doc.file_path)
+    try:
+        inside_storage = os.path.commonpath([storage_root, target_path]) == storage_root
+    except ValueError:
+        inside_storage = False
+
+    if not inside_storage or not os.path.isfile(target_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Tệp tài liệu gốc không còn tồn tại trên máy chủ."},
+        )
+
+    media_type = doc.mime_type or (
+        "application/pdf" if target_path.lower().endswith(".pdf") else "text/plain"
+    )
+    return FileResponse(
+        path=target_path,
+        media_type=media_type,
+        filename=doc.title,
+        content_disposition_type="inline",
+    )
 
 
 @router.post("/documents/{document_id}/retry", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)

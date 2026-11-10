@@ -143,7 +143,8 @@ data class TopicStat(
 
 data class SourceCitation(
     @SerializedName("document_title") val documentTitle: String,
-    @SerializedName("page_number") val pageNumber: Int? = null
+    @SerializedName("page_number") val pageNumber: Int? = null,
+    @SerializedName("document_id") val documentId: String? = null
 )
 
 data class QuestionResultDetail(
@@ -198,6 +199,7 @@ data class RecommendationItem(
     @SerializedName("correct_count") val correctCount: Int,
     val accuracy: Double,
     @SerializedName("recommended_action") val recommendedAction: String,
-    @SerializedName("suggested_document") val suggestedDocument: SuggestedDocument? = null
+    @SerializedName("suggested_document") val suggestedDocument: SuggestedDocument? = null,
+    @SerializedName("suggested_pages") val suggestedPages: List<Int> = emptyList()
 )
 

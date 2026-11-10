@@ -5,6 +5,7 @@ import com.studyflow.ai.BuildConfig
 import com.studyflow.ai.data.model.*
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -49,6 +50,10 @@ interface StudyFlowApiService {
 
     @GET("documents/{documentId}/status")
     suspend fun getDocumentStatus(@Path("documentId") documentId: String): DocumentStatusResponse
+
+    @Streaming
+    @GET("documents/{documentId}/file")
+    suspend fun downloadDocumentFile(@Path("documentId") documentId: String): Response<ResponseBody>
 
     @POST("documents/{documentId}/retry")
     suspend fun retryDocument(@Path("documentId") documentId: String): DocumentResponse
