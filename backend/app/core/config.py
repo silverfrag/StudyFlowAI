@@ -14,9 +14,10 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 20
 
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash-lite,gemini-3.1-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
-    GEMINI_TIMEOUT_SECONDS: float = 45.0
+    GEMINI_TIMEOUT_SECONDS: float = 35.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

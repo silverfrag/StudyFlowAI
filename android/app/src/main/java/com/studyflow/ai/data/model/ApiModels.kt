@@ -109,6 +109,16 @@ data class QuizResponse(
     @SerializedName("created_at") val createdAt: String
 )
 
+data class QuizSummaryResponse(
+    val id: String,
+    @SerializedName("course_id") val courseId: String,
+    val title: String,
+    @SerializedName("total_questions") val totalQuestions: Int,
+    @SerializedName("attempt_count") val attemptCount: Int = 0,
+    @SerializedName("latest_score") val latestScore: Double? = null,
+    @SerializedName("created_at") val createdAt: String
+)
+
 data class AnswerSubmission(
     @SerializedName("question_id") val questionId: String,
     @SerializedName("selected_option_id") val selectedOptionId: String?

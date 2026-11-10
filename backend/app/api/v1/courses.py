@@ -8,8 +8,9 @@ import os
 from app.core.database import get_db
 from app.models.course import Course
 from app.models.document import Document
-from app.models.quiz import Quiz
+from app.models.quiz import Quiz, QuizAttempt
 from app.schemas.course import CourseCreate, CourseUpdate, CourseResponse
+from app.schemas.quiz import QuizSummaryResponse
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
@@ -126,4 +127,48 @@ async def delete_course(course_id: UUID, db: AsyncSession = Depends(get_db)):
     await db.delete(course)
     await db.commit()
     return None
+
+
+@router.get("/{course_id}/quizzes", response_model=List[QuizSummaryResponse])
+async def list_course_quizzes(course_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Liệt kê danh sách bài quiz đã tạo của môn học kèm số lượt làm và điểm gần nhất."""
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy môn học."},
+        )
+
+    quiz_res = await db.execute(
+        select(Quiz).where(Quiz.course_id == course_id).order_by(Quiz.created_at.desc())
+    )
+    quizzes = quiz_res.scalars().all()
+    if not quizzes:
+        return []
+
+    quiz_ids = [q.id for q in quizzes]
+    attempts_res = await db.execute(
+        select(QuizAttempt.quiz_id, QuizAttempt.score, QuizAttempt.submitted_at)
+        .where(QuizAttempt.quiz_id.in_(quiz_ids))
+        .order_by(QuizAttempt.submitted_at.desc())
+    )
+    attempt_counts: dict = {}
+    latest_scores: dict = {}
+    for q_id, score, _submitted_at in attempts_res.all():
+        attempt_counts[q_id] = attempt_counts.get(q_id, 0) + 1
+        if q_id not in latest_scores:
+            latest_scores[q_id] = score
+
+    return [
+        QuizSummaryResponse(
+            id=q.id,
+            course_id=q.course_id,
+            title=q.title,
+            total_questions=q.total_questions,
+            attempt_count=attempt_counts.get(q.id, 0),
+            latest_score=latest_scores.get(q.id),
+            created_at=q.created_at,
+        )
+        for q in quizzes
+    ]
 

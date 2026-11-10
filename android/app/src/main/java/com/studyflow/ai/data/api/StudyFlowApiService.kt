@@ -50,6 +50,9 @@ interface StudyFlowApiService {
     @GET("documents/{documentId}/status")
     suspend fun getDocumentStatus(@Path("documentId") documentId: String): DocumentStatusResponse
 
+    @POST("documents/{documentId}/retry")
+    suspend fun retryDocument(@Path("documentId") documentId: String): DocumentResponse
+
     @DELETE("documents/{documentId}")
     suspend fun deleteDocument(@Path("documentId") documentId: String): Response<Unit>
 
@@ -58,6 +61,9 @@ interface StudyFlowApiService {
     suspend fun askAssistant(@Body request: AskRequest): AskResponse
 
     // --- Quizzes (UC04, UC05, UC06) ---
+    @GET("courses/{courseId}/quizzes")
+    suspend fun getCourseQuizzes(@Path("courseId") courseId: String): List<QuizSummaryResponse>
+
     @POST("quizzes")
     suspend fun createQuiz(@Body request: QuizCreateRequest): QuizResponse
 
@@ -80,13 +86,13 @@ interface StudyFlowApiService {
 
 object RetrofitClient {
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
     }
 
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 

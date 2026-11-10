@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.data.model.DocumentResponse
 import com.studyflow.ai.data.model.QuizResponse
+import com.studyflow.ai.data.model.QuizSummaryResponse
 import com.studyflow.ai.data.repository.StudyFlowRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +19,8 @@ sealed interface CourseDetailUiState {
     data object Loading : CourseDetailUiState
     data class Success(
         val course: CourseResponse,
-        val documents: List<DocumentResponse>
+        val documents: List<DocumentResponse>,
+        val quizzes: List<QuizSummaryResponse> = emptyList()
     ) : CourseDetailUiState
     data class Error(val message: String) : CourseDetailUiState
 }
@@ -47,11 +49,13 @@ class CourseDetailViewModel(
             _uiState.value = CourseDetailUiState.Loading
             val courseRes = repository.getCourse(courseId)
             val docsRes = repository.getCourseDocuments(courseId)
+            val quizzesRes = repository.getCourseQuizzes(courseId)
 
             if (courseRes.isSuccess && docsRes.isSuccess) {
                 _uiState.value = CourseDetailUiState.Success(
                     course = courseRes.getOrThrow(),
-                    documents = docsRes.getOrThrow()
+                    documents = docsRes.getOrThrow(),
+                    quizzes = quizzesRes.getOrElse { emptyList() }
                 )
             } else {
                 val err = courseRes.exceptionOrNull()?.message
@@ -117,9 +121,24 @@ class CourseDetailViewModel(
     fun refreshDocumentsSilently(courseId: String) {
         val current = _uiState.value as? CourseDetailUiState.Success ?: return
         viewModelScope.launch {
-            repository.getCourseDocuments(courseId).onSuccess { docs ->
-                _uiState.value = current.copy(documents = docs)
-            }
+            val docs = repository.getCourseDocuments(courseId).getOrNull() ?: current.documents
+            val quizzes = repository.getCourseQuizzes(courseId).getOrNull() ?: current.quizzes
+            val course = repository.getCourse(courseId).getOrNull() ?: current.course
+            _uiState.value = current.copy(course = course, documents = docs, quizzes = quizzes)
+        }
+    }
+
+    fun retryDocument(courseId: String, documentId: String) {
+        viewModelScope.launch {
+            _actionMessage.value = null
+            repository.retryDocument(documentId)
+                .onSuccess {
+                    _actionMessage.value = "Đã gửi yêu cầu xử lý lại tài liệu."
+                    refreshDocumentsSilently(courseId)
+                }
+                .onFailure { err ->
+                    _actionMessage.value = err.message ?: "Không thể xử lý lại tài liệu."
+                }
         }
     }
 

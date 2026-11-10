@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 // Indigo & Neutral Colors theo docs/ui-wireframes.md
@@ -15,12 +16,54 @@ val NeutralBackground = Color(0xFFF8FAFC)
 val NeutralSurface = Color(0xFFFFFFFF)
 val NeutralTextPrimary = Color(0xFF0F172A)
 val NeutralTextSecondary = Color(0xFF64748B)
-val SuccessGreen = Color(0xFF16A34A)
+val SuccessGreen = Color(0xFF15803D)
 val SuccessGreenBg = Color(0xFFDCFCE7)
-val WarningAmber = Color(0xFFD97706)
+val WarningAmber = Color(0xFFB45309)
 val WarningAmberBg = Color(0xFFFEF3C7)
 val ErrorRed = Color(0xFFDC2626)
 val ErrorRedBg = Color(0xFFFEE2E2)
+
+@Immutable
+data class StudyFlowSemanticColors(
+    val success: Color,
+    val successContainer: Color,
+    val onSuccessContainer: Color,
+    val warning: Color,
+    val warningContainer: Color,
+    val onWarningContainer: Color,
+    val error: Color,
+    val errorContainer: Color,
+    val onErrorContainer: Color
+)
+
+@Composable
+fun studyFlowSemanticColors(darkTheme: Boolean = isSystemInDarkTheme()): StudyFlowSemanticColors {
+    return if (darkTheme) {
+        StudyFlowSemanticColors(
+            success = Color(0xFF4ADE80),
+            successContainer = Color(0xFF14532D),
+            onSuccessContainer = Color(0xFFDCFCE7),
+            warning = Color(0xFFFBBF24),
+            warningContainer = Color(0xFF78350F),
+            onWarningContainer = Color(0xFFFEF3C7),
+            error = Color(0xFFF87171),
+            errorContainer = Color(0xFF7F1D1D),
+            onErrorContainer = Color(0xFFFEE2E2)
+        )
+    } else {
+        StudyFlowSemanticColors(
+            success = SuccessGreen,
+            successContainer = SuccessGreenBg,
+            onSuccessContainer = Color(0xFF14532D),
+            warning = WarningAmber,
+            warningContainer = WarningAmberBg,
+            onWarningContainer = Color(0xFF78350F),
+            error = ErrorRed,
+            errorContainer = ErrorRedBg,
+            onErrorContainer = Color(0xFF7F1D1D)
+        )
+    }
+}
 
 private val LightColorScheme = lightColorScheme(
     primary = IndigoPrimary,
@@ -54,7 +97,9 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = Color(0xFF334155),
     onSurfaceVariant = Color(0xFF94A3B8),
     error = Color(0xFFF87171),
-    errorContainer = Color(0xFF7F1D1D)
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0xFF7F1D1D),
+    onErrorContainer = Color(0xFFFEE2E2)
 )
 
 @Composable

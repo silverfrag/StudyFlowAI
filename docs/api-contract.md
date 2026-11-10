@@ -201,6 +201,10 @@ Polling kiểm tra tiến độ xử lý tài liệu.
 }
 ```
 
+#### `POST /api/v1/documents/{document_id}/retry`
+Kích hoạt xử lý lại (trích xuất và tạo vector embedding) cho tài liệu ở trạng thái `error` mà file gốc vẫn còn trên server.
+- **Response:** `202 Accepted` (Trả về Document Object với `status: "processing"`, `error_message: null`; trả `400 VALIDATION_ERROR` nếu file gốc không còn tồn tại trên storage).
+
 #### `DELETE /api/v1/documents/{document_id}`
 Xóa tài liệu và các vector chunks liên quan.
 - **Response:** `204 No Content`
@@ -300,6 +304,23 @@ Hỏi đáp theo tài liệu đã nạp.
   ],
   "created_at": "2026-11-08T09:20:00Z"
 }
+```
+
+#### `GET /api/v1/courses/{course_id}/quizzes`
+Lấy danh sách tóm tắt các bài quiz đã tạo của một môn học (sắp xếp mới nhất trước) để hiển thị trong Chi tiết môn học và cho phép làm lại.
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": "q9f8e7d6-3333-4444-8555-666677778888",
+    "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+    "title": "Quiz: Khóa chính và Ràng buộc toàn vẹn",
+    "total_questions": 5,
+    "attempt_count": 2,
+    "latest_score": 8.0,
+    "created_at": "2026-11-08T09:20:00Z"
+  }
+]
 ```
 
 #### `GET /api/v1/quizzes/{quiz_id}`

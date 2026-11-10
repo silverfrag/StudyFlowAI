@@ -1,5 +1,6 @@
 package com.studyflow.ai.ui.screens.quiz
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -37,6 +38,16 @@ fun QuizScreen(
     val submitError by viewModel.submitError.collectAsState()
 
     var showConfirmSubmitDialog by remember { mutableStateOf(false) }
+    var showExitConfirmDialog by remember { mutableStateOf(false) }
+
+    val hasProgress = (uiState as? QuizUiState.Success)?.quiz?.questions?.isNotEmpty() == true &&
+        selectedAnswers.isNotEmpty()
+
+    BackHandler(enabled = hasProgress || isSubmitting) {
+        if (!isSubmitting) {
+            showExitConfirmDialog = true
+        }
+    }
 
     LaunchedEffect(quizId) {
         viewModel.loadQuiz(quizId)
@@ -47,7 +58,12 @@ fun QuizScreen(
             TopAppBar(
                 title = { Text("Kiểm tra kiến thức", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (isSubmitting) return@IconButton
+                            if (hasProgress) showExitConfirmDialog = true else onBack()
+                        }
+                    ) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Thoát")
                     }
                 }
@@ -286,6 +302,32 @@ fun QuizScreen(
             dismissButton = {
                 TextButton(onClick = { showConfirmSubmitDialog = false }) {
                     Text("Làm tiếp")
+                }
+            }
+        )
+    }
+
+    if (showExitConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirmDialog = false },
+            title = { Text("Thoát bài kiểm tra?") },
+            text = {
+                Text("Bạn đã chọn ${selectedAnswers.size} câu trả lời. Nếu thoát bây giờ, tiến trình làm bài hiện tại sẽ không được lưu.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirmDialog = false
+                        onBack()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Thoát")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirmDialog = false }) {
+                    Text("Tiếp tục làm")
                 }
             }
         )

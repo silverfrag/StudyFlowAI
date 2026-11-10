@@ -71,7 +71,7 @@ STORAGE_DIR="./storage"
 MAX_UPLOAD_SIZE_MB=20
 
 GEMINI_API_KEY="AIzaSy..." # Thay bằng API Key thật của bạn
-GEMINI_MODEL="gemini-3.8-flash"
+GEMINI_MODEL="gemini-3.5-flash-lite"
 GEMINI_EMBEDDING_MODEL="gemini-embedding-001"
 ```
 

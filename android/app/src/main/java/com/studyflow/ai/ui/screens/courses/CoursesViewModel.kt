@@ -32,12 +32,18 @@ class CoursesViewModel(
         loadCourses()
     }
 
-    fun loadCourses() {
+    fun loadCourses(silent: Boolean = false) {
         viewModelScope.launch {
-            _uiState.value = CoursesUiState.Loading
+            if (!silent || _uiState.value !is CoursesUiState.Success) {
+                _uiState.value = CoursesUiState.Loading
+            }
             repository.getCourses()
                 .onSuccess { list -> _uiState.value = CoursesUiState.Success(list) }
-                .onFailure { err -> _uiState.value = CoursesUiState.Error(err.message ?: "Lỗi tải danh sách môn học.") }
+                .onFailure { err ->
+                    if (!silent || _uiState.value !is CoursesUiState.Success) {
+                        _uiState.value = CoursesUiState.Error(err.message ?: "Lỗi tải danh sách môn học.")
+                    }
+                }
         }
     }
 

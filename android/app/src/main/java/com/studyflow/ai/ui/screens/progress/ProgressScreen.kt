@@ -1,5 +1,6 @@
 package com.studyflow.ai.ui.screens.progress
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,10 +23,8 @@ import com.studyflow.ai.data.model.SuggestedDocument
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
-import com.studyflow.ai.ui.theme.ErrorRed
 import com.studyflow.ai.ui.theme.StudyFlowTheme
-import com.studyflow.ai.ui.theme.WarningAmber
-import com.studyflow.ai.ui.theme.WarningAmberBg
+import com.studyflow.ai.ui.theme.studyFlowSemanticColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -209,6 +208,7 @@ private fun RecommendationCard(
     onPracticeClick: () -> Unit
 ) {
     val percent = (item.accuracy * 100).toInt()
+    val semanticColors = studyFlowSemanticColors()
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -233,12 +233,13 @@ private fun RecommendationCard(
                     )
                 }
                 Surface(
-                    color = WarningAmberBg,
+                    color = semanticColors.warningContainer,
+                    contentColor = semanticColors.onWarningContainer,
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         text = "$percent% đúng",
-                        color = WarningAmber,
+                        color = semanticColors.warning,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -250,7 +251,7 @@ private fun RecommendationCard(
             LinearProgressIndicator(
                 progress = { item.accuracy.toFloat() },
                 modifier = Modifier.fillMaxWidth().height(6.dp),
-                color = ErrorRed
+                color = semanticColors.error
             )
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -294,6 +295,7 @@ private fun RecommendationCard(
 }
 
 @Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun RecommendationCardPreview() {
     StudyFlowTheme {

@@ -34,6 +34,16 @@ class QuizClientResponse(BaseModel):
     created_at: datetime
 
 
+class QuizSummaryResponse(BaseModel):
+    id: UUID
+    course_id: UUID
+    title: str
+    total_questions: int
+    attempt_count: int = 0
+    latest_score: Optional[float] = None
+    created_at: datetime
+
+
 class AnswerSubmission(BaseModel):
     question_id: UUID
     selected_option_id: Optional[OptionId] = None

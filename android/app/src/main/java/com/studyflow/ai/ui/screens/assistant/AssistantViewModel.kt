@@ -6,9 +6,13 @@ import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.data.model.DocumentResponse
 import com.studyflow.ai.data.repository.StudyFlowRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class ChatMessage(
@@ -37,29 +41,46 @@ class AssistantViewModel(
     private val _selectedDocument = MutableStateFlow<DocumentResponse?>(null)
     val selectedDocument: StateFlow<DocumentResponse?> = _selectedDocument.asStateFlow()
 
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+    private val _messagesByCourse = MutableStateFlow<Map<String, List<ChatMessage>>>(emptyMap())
+    val messages: StateFlow<List<ChatMessage>> = combine(_selectedCourse, _messagesByCourse) { course, map ->
+        if (course == null) emptyList() else map[course.id].orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _isAsking = MutableStateFlow(false)
-    val isAsking: StateFlow<Boolean> = _isAsking.asStateFlow()
+    private val _askingCourseIds = MutableStateFlow<Set<String>>(emptySet())
+    val isAsking: StateFlow<Boolean> = combine(_selectedCourse, _askingCourseIds) { course, askingIds ->
+        course != null && askingIds.contains(course.id)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _coursesLoading = MutableStateFlow(true)
     val coursesLoading: StateFlow<Boolean> = _coursesLoading.asStateFlow()
 
-    fun loadCourses(preferredCourseId: String? = null) {
-        viewModelScope.launch {
-            _coursesLoading.value = true
+    private var loadCoursesJob: Job? = null
+    private var loadDocsJob: Job? = null
+
+    fun loadCourses(preferredCourseId: String? = null, silent: Boolean = false) {
+        loadCoursesJob?.cancel()
+        loadCoursesJob = viewModelScope.launch {
+            if (!silent || _courses.value.isEmpty()) {
+                _coursesLoading.value = true
+            }
             repository.getCourses()
                 .onSuccess { list ->
                     _courses.value = list
+                    val prevCourseId = _selectedCourse.value?.id
                     val chosen = if (preferredCourseId != null) {
                         list.find { it.id == preferredCourseId } ?: list.firstOrNull()
                     } else {
-                        _selectedCourse.value?.let { cur -> list.find { it.id == cur.id } } ?: list.firstOrNull()
+                        prevCourseId?.let { curId -> list.find { it.id == curId } } ?: list.firstOrNull()
                     }
                     _selectedCourse.value = chosen
                     _coursesLoading.value = false
-                    chosen?.let { loadDocumentsForCourse(it.id) }
+                    if (chosen != null) {
+                        val sameCourse = chosen.id == prevCourseId
+                        loadDocumentsForCourse(chosen.id, preserveSelection = sameCourse)
+                    } else {
+                        _documents.value = emptyList()
+                        _selectedDocument.value = null
+                    }
                 }
                 .onFailure {
                     _coursesLoading.value = false
@@ -67,23 +88,36 @@ class AssistantViewModel(
         }
     }
 
-    private fun loadDocumentsForCourse(courseId: String) {
-        viewModelScope.launch {
+    private fun loadDocumentsForCourse(courseId: String, preserveSelection: Boolean) {
+        loadDocsJob?.cancel()
+        loadDocsJob = viewModelScope.launch {
             repository.getCourseDocuments(courseId)
                 .onSuccess { docs ->
-                    _documents.value = docs.filter { it.status == "ready" }
-                    _selectedDocument.value = null
+                    if (_selectedCourse.value?.id == courseId) {
+                        val readyDocs = docs.filter { it.status == "ready" }
+                        _documents.value = readyDocs
+                        _selectedDocument.value = if (preserveSelection) {
+                            _selectedDocument.value?.let { prev -> readyDocs.find { it.id == prev.id } }
+                        } else {
+                            null
+                        }
+                    }
                 }
                 .onFailure {
-                    _documents.value = emptyList()
-                    _selectedDocument.value = null
+                    if (_selectedCourse.value?.id == courseId && !preserveSelection) {
+                        _documents.value = emptyList()
+                        _selectedDocument.value = null
+                    }
                 }
         }
     }
 
     fun selectCourse(course: CourseResponse) {
+        if (_selectedCourse.value?.id == course.id) return
         _selectedCourse.value = course
-        loadDocumentsForCourse(course.id)
+        _documents.value = emptyList()
+        _selectedDocument.value = null
+        loadDocumentsForCourse(course.id, preserveSelection = false)
     }
 
     fun selectDocument(document: DocumentResponse?) {
@@ -91,23 +125,36 @@ class AssistantViewModel(
     }
 
     fun clearMessages() {
-        _messages.value = emptyList()
+        val courseId = _selectedCourse.value?.id ?: return
+        _messagesByCourse.value = _messagesByCourse.value - courseId
     }
 
     fun retryQuestion(errorMessageId: String, questionText: String) {
-        if (_isAsking.value) return
-        _messages.value = _messages.value.filterNot { it.id == errorMessageId }
-        askQuestionInternal(questionText, appendUserMessage = false)
+        val course = _selectedCourse.value ?: return
+        if (_askingCourseIds.value.contains(course.id)) return
+        val updated = _messagesByCourse.value[course.id].orEmpty().filterNot { it.id == errorMessageId }
+        _messagesByCourse.value = _messagesByCourse.value + (course.id to updated)
+        askQuestionInternal(course, questionText, appendUserMessage = false)
     }
 
     fun askQuestion(questionText: String) {
-        askQuestionInternal(questionText, appendUserMessage = true)
+        val course = _selectedCourse.value ?: return
+        askQuestionInternal(course, questionText, appendUserMessage = true)
     }
 
-    private fun askQuestionInternal(questionText: String, appendUserMessage: Boolean) {
-        val course = _selectedCourse.value ?: return
+    private fun appendMessage(courseId: String, message: ChatMessage) {
+        val current = _messagesByCourse.value[courseId].orEmpty()
+        _messagesByCourse.value = _messagesByCourse.value + (courseId to (current + message))
+    }
+
+    private fun askQuestionInternal(
+        course: CourseResponse,
+        questionText: String,
+        appendUserMessage: Boolean
+    ) {
         val trimmed = questionText.trim()
-        if (trimmed.isEmpty() || _isAsking.value) return
+        if (trimmed.isEmpty() || _askingCourseIds.value.contains(course.id)) return
+        val documentId = _selectedDocument.value?.id
 
         if (appendUserMessage) {
             val userMsg = ChatMessage(
@@ -115,12 +162,12 @@ class AssistantViewModel(
                 isUser = true,
                 text = trimmed
             )
-            _messages.value = _messages.value + userMsg
+            appendMessage(course.id, userMsg)
         }
-        _isAsking.value = true
+        _askingCourseIds.value = _askingCourseIds.value + course.id
 
         viewModelScope.launch {
-            repository.askAssistant(course.id, _selectedDocument.value?.id, trimmed)
+            repository.askAssistant(course.id, documentId, trimmed)
                 .onSuccess { res ->
                     val aiMsg = ChatMessage(
                         id = "a-${System.currentTimeMillis()}",
@@ -129,8 +176,8 @@ class AssistantViewModel(
                         foundInContext = res.foundInContext,
                         citations = res.citations
                     )
-                    _messages.value = _messages.value + aiMsg
-                    _isAsking.value = false
+                    appendMessage(course.id, aiMsg)
+                    _askingCourseIds.value = _askingCourseIds.value - course.id
                 }
                 .onFailure { err ->
                     val errMsg = ChatMessage(
@@ -141,8 +188,8 @@ class AssistantViewModel(
                         isError = true,
                         retryQuestion = trimmed
                     )
-                    _messages.value = _messages.value + errMsg
-                    _isAsking.value = false
+                    appendMessage(course.id, errMsg)
+                    _askingCourseIds.value = _askingCourseIds.value - course.id
                 }
         }
     }

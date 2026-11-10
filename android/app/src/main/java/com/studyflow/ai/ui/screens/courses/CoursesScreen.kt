@@ -14,6 +14,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.ui.components.EmptyStateView
@@ -27,6 +30,7 @@ fun CoursesScreen(
     onOpenCourseDetail: (String) -> Unit,
     viewModel: CoursesViewModel = viewModel()
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val isCreating by viewModel.isCreating.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
@@ -35,9 +39,24 @@ fun CoursesScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var courseToEdit by remember { mutableStateOf<CourseResponse?>(null) }
     var courseToDelete by remember { mutableStateOf<CourseResponse?>(null) }
+    var skipNextResume by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        viewModel.loadCourses()
+        viewModel.loadCourses(silent = uiState is CoursesUiState.Success)
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (skipNextResume) {
+                    skipNextResume = false
+                } else {
+                    viewModel.loadCourses(silent = true)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
@@ -91,6 +110,13 @@ fun CoursesScreen(
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             placeholder = { Text("Tìm kiếm môn học...") },
                             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Outlined.Close, contentDescription = "Xóa từ khóa")
+                                    }
+                                }
+                            },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp)
                         )
@@ -98,7 +124,9 @@ fun CoursesScreen(
                         if (filteredCourses.isEmpty()) {
                             EmptyStateView(
                                 title = "Không tìm thấy kết quả",
-                                description = "Không có môn học nào khớp với từ khóa '$searchQuery'."
+                                description = "Không có môn học nào khớp với từ khóa '$searchQuery'.",
+                                actionLabel = "Xóa bộ lọc",
+                                onActionClick = { searchQuery = "" }
                             )
                         } else {
                             LazyColumn(
@@ -131,6 +159,7 @@ fun CoursesScreen(
             initialDescription = "",
             isSaving = isCreating,
             error = actionError,
+            onClearError = { viewModel.clearError() },
             onDismiss = {
                 viewModel.clearError()
                 showCreateDialog = false
@@ -151,6 +180,7 @@ fun CoursesScreen(
             initialDescription = editing.description ?: "",
             isSaving = isCreating,
             error = actionError,
+            onClearError = { viewModel.clearError() },
             onDismiss = {
                 viewModel.clearError()
                 courseToEdit = null
@@ -282,6 +312,7 @@ private fun CourseFormDialog(
     initialDescription: String,
     isSaving: Boolean,
     error: String?,
+    onClearError: () -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (String, String?) -> Unit
 ) {
@@ -295,14 +326,20 @@ private fun CourseFormDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        name = it
+                        onClearError()
+                    },
                     label = { Text("Tên môn học *") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = description,
-                    onValueChange = { description = it },
+                    onValueChange = {
+                        description = it
+                        onClearError()
+                    },
                     label = { Text("Mô tả ngắn") },
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth()

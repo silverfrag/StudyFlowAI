@@ -99,8 +99,20 @@ class StudyFlowRepository {
         Result.failure(Exception(extractError(e)))
     }
 
+    suspend fun retryDocument(documentId: String): Result<DocumentResponse> = try {
+        Result.success(api.retryDocument(documentId))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
     suspend fun askAssistant(courseId: String, documentId: String?, question: String): Result<AskResponse> = try {
         Result.success(api.askAssistant(AskRequest(courseId, documentId, question)))
+    } catch (e: Exception) {
+        Result.failure(Exception(extractError(e)))
+    }
+
+    suspend fun getCourseQuizzes(courseId: String): Result<List<QuizSummaryResponse>> = try {
+        Result.success(api.getCourseQuizzes(courseId))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }

@@ -1,5 +1,6 @@
 package com.studyflow.ai.ui.screens.result
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,13 +20,8 @@ import com.studyflow.ai.data.model.QuizSubmitResponse
 import com.studyflow.ai.data.model.SourceCitation
 import com.studyflow.ai.data.model.TopicStat
 import com.studyflow.ai.ui.components.EmptyStateView
-import com.studyflow.ai.ui.theme.ErrorRed
-import com.studyflow.ai.ui.theme.ErrorRedBg
 import com.studyflow.ai.ui.theme.StudyFlowTheme
-import com.studyflow.ai.ui.theme.SuccessGreen
-import com.studyflow.ai.ui.theme.SuccessGreenBg
-import com.studyflow.ai.ui.theme.WarningAmber
-import com.studyflow.ai.ui.theme.WarningAmberBg
+import com.studyflow.ai.ui.theme.studyFlowSemanticColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,6 +31,7 @@ fun ResultScreen(
     onNavigateToProgress: () -> Unit,
     onNavigateToCourseDetail: (() -> Unit)? = null
 ) {
+    val semanticColors = studyFlowSemanticColors()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -117,13 +114,14 @@ fun ResultScreen(
                                     )
                                     if (isWeak) {
                                         Surface(
-                                            color = WarningAmberBg,
+                                            color = semanticColors.warningContainer,
+                                            contentColor = semanticColors.onWarningContainer,
                                             shape = RoundedCornerShape(6.dp),
                                             modifier = Modifier.padding(end = 8.dp)
                                         ) {
                                             Text(
                                                 text = "Cần ôn tập",
-                                                color = WarningAmber,
+                                                color = semanticColors.warning,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -134,14 +132,14 @@ fun ResultScreen(
                                         text = "$percent% (${stat.correctCount}/${stat.totalQuestions})",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isWeak) ErrorRed else SuccessGreen
+                                        color = if (isWeak) semanticColors.error else semanticColors.success
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 LinearProgressIndicator(
                                     progress = { stat.accuracy.toFloat() },
                                     modifier = Modifier.fillMaxWidth().height(6.dp),
-                                    color = if (isWeak) ErrorRed else SuccessGreen
+                                    color = if (isWeak) semanticColors.error else semanticColors.success
                                 )
                             }
                         }
@@ -153,19 +151,23 @@ fun ResultScreen(
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = WarningAmberBg)
+                                colors = CardDefaults.cardColors(
+                                    containerColor = semanticColors.warningContainer,
+                                    contentColor = semanticColors.onWarningContainer
+                                )
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
                                         text = "Gợi ý ôn tập",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = WarningAmber
+                                        color = semanticColors.warning
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = "Bạn đạt dưới 60% ở: ${weakTopics.joinToString(", ") { it.topic }}. Mở Tiến độ để xem tài liệu và làm quiz củng cố.",
-                                        style = MaterialTheme.typography.bodySmall
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = semanticColors.onWarningContainer
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     FilledTonalButton(
@@ -237,6 +239,11 @@ fun ResultScreen(
 
 @Composable
 private fun QuestionResultCard(detail: QuestionResultDetail) {
+    val semanticColors = studyFlowSemanticColors()
+    val feedbackContainer = if (detail.isCorrect) semanticColors.successContainer else semanticColors.errorContainer
+    val feedbackContent = if (detail.isCorrect) semanticColors.onSuccessContainer else semanticColors.onErrorContainer
+    val statusAccent = if (detail.isCorrect) semanticColors.success else semanticColors.error
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -247,7 +254,7 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
                 Icon(
                     imageVector = if (detail.isCorrect) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
                     contentDescription = null,
-                    tint = if (detail.isCorrect) SuccessGreen else ErrorRed,
+                    tint = statusAccent,
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -262,7 +269,8 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
 
             val chosenText = detail.selectedOptionId ?: "Bỏ trống"
             Surface(
-                color = if (detail.isCorrect) SuccessGreenBg else ErrorRedBg,
+                color = feedbackContainer,
+                contentColor = feedbackContent,
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -271,12 +279,13 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
                         text = "Bạn chọn: $chosenText  |  Đáp án đúng: ${detail.correctOptionId}",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (detail.isCorrect) SuccessGreen else ErrorRed
+                        color = statusAccent
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = detail.explanation,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
+                        color = feedbackContent
                     )
                     detail.citation?.let { cite ->
                         val pageText = cite.pageNumber?.let { " (Trang $it)" } ?: ""
@@ -284,7 +293,7 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
                         Text(
                             text = "Nguồn: ${cite.documentTitle}$pageText",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = feedbackContent.copy(alpha = 0.8f)
                         )
                     }
                 }
@@ -294,6 +303,7 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
 }
 
 @Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ResultScreenPreview() {
     StudyFlowTheme {

@@ -110,11 +110,18 @@ class PureBackendUnitTests(unittest.TestCase):
         with patch.object(settings, "GEMINI_MODEL", "gemini-1.5-flash"), \
              patch.object(settings, "GEMINI_EMBEDDING_MODEL", "text-embedding-004"), \
              patch.object(settings, "GEMINI_API_KEY", "your_gemini_api_key_here"):
-            self.assertEqual(gemini_service.resolve_generation_model(), "gemini-3.8-flash")
+            self.assertEqual(gemini_service.resolve_generation_model(), "gemini-3.5-flash-lite")
             self.assertEqual(gemini_service.resolve_embedding_model(), "gemini-embedding-001")
             self.assertFalse(gemini_service.is_gemini_configured())
             with self.assertRaises(gemini_service.AIServiceError):
                 gemini_service.get_genai_client()
+
+        with patch.object(settings, "GEMINI_MODEL", "gemini-3.8-flash"), \
+             patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-3.1-flash-lite"):
+            self.assertEqual(
+                gemini_service.resolve_generation_candidates(),
+                ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"],
+            )
 
     def test_quiz_output_validation(self):
         valid = quiz_service._QuizLLMOutput(
@@ -332,7 +339,13 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("correct_option_id", q)
                 self.assertNotIn("explanation", q)
 
-            # Kiểm tra GET quiz cũng giấu đáp án
+            # Kiểm tra GET quiz cũng giấu đáp án & GET /courses/{id}/quizzes trước khi nộp
+            list_quiz_before = await client.get(f"/api/v1/courses/{course_id}/quizzes")
+            self.assertEqual(list_quiz_before.status_code, 200)
+            self.assertEqual(len(list_quiz_before.json()), 1)
+            self.assertEqual(list_quiz_before.json()[0]["attempt_count"], 0)
+            self.assertIsNone(list_quiz_before.json()[0]["latest_score"])
+
             get_quiz_res = await client.get(f"/api/v1/quizzes/{quiz_id}")
             self.assertEqual(get_quiz_res.status_code, 200)
             for q in get_quiz_res.json()["questions"]:
@@ -358,6 +371,11 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(submit_body["details"][0]["citation"]["page_number"], 1)
             self.assertIsNone(submit_body["details"][2]["selected_option_id"])
             self.assertIsNone(submit_body["details"][2]["citation"])
+
+            list_quiz_after = await client.get(f"/api/v1/courses/{course_id}/quizzes")
+            self.assertEqual(list_quiz_after.status_code, 200)
+            self.assertEqual(list_quiz_after.json()[0]["attempt_count"], 1)
+            self.assertEqual(list_quiz_after.json()[0]["latest_score"], 3.3)
 
             # 7. Kiểm tra recommendations phát hiện topic yếu (>= 3 câu & < 60%)
             rec_res = await client.get("/api/v1/recommendations")
@@ -392,6 +410,53 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 st2 = await client.get(f"/api/v1/documents/{up2.json()['id']}/status")
                 self.assertEqual(st2.json()["status"], "error")
                 self.assertIn("GEMINI_API_KEY", st2.json()["error_message"] or "")
+
+                # Thử xử lý lại tài liệu ở trạng thái error khi đã có embedder hợp lệ -> chuyển sang ready
+                doc2_id = up2.json()["id"]
+                with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.7)])):
+                    retry_res = await client.post(f"/api/v1/documents/{doc2_id}/retry")
+                self.assertEqual(retry_res.status_code, 202, retry_res.text)
+                st2_after = await client.get(f"/api/v1/documents/{doc2_id}/status")
+                self.assertEqual(st2_after.json()["status"], "ready")
+                self.assertIsNone(st2_after.json()["error_message"])
+
+                # Nếu file gốc trên đĩa bị mất, retry phải báo 400 VALIDATION_ERROR rõ ràng
+                for name in os.listdir(self.tmp_storage.name):
+                    os.remove(os.path.join(self.tmp_storage.name, name))
+                retry_missing = await client.post(f"/api/v1/documents/{doc2_id}/retry")
+                self.assertEqual(retry_missing.status_code, 400)
+                self.assertEqual(retry_missing.json()["detail"]["code"], "VALIDATION_ERROR")
+
+    async def test_gemini_structured_json_fallback_on_timeout(self):
+        class _DummyInteraction:
+            status = "completed"
+            output_text = '{"found_in_context": true, "answer": "OK fallback", "cited_indices": [0]}'
+
+        called_models: List[str] = []
+
+        class _FakeInteractions:
+            async def create(self, **kwargs):
+                called_models.append(kwargs["model"])
+                if kwargs["model"] == "gemini-3.8-flash":
+                    raise TimeoutError("simulated timeout")
+                return _DummyInteraction()
+
+        class _FakeAio:
+            interactions = _FakeInteractions()
+
+        class _FakeClient:
+            aio = _FakeAio()
+
+        with patch.object(settings, "GEMINI_MODEL", "gemini-3.8-flash"), \
+             patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite"), \
+             patch("app.services.gemini_service.get_genai_client", return_value=_FakeClient()):
+            res = await gemini_service.generate_structured_json(
+                prompt="test prompt",
+                system_instruction="test sys",
+                schema_cls=rag_service._RagLLMOutput,
+            )
+        self.assertEqual(called_models, ["gemini-3.8-flash", "gemini-3.5-flash-lite"])
+        self.assertEqual(res.answer, "OK fallback")
 
 
 if __name__ == "__main__":

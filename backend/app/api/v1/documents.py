@@ -131,6 +131,47 @@ async def get_document_status(document_id: UUID, db: AsyncSession = Depends(get_
     return DocumentStatusResponse(id=doc.id, status=doc.status, error_message=doc.error_message)
 
 
+@router.post("/documents/{document_id}/retry", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
+async def retry_document_processing(
+    document_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Thử xử lý lại tài liệu ở trạng thái error nếu file gốc vẫn còn trên server."""
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy tài liệu."},
+        )
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": "Không tìm thấy tệp gốc trên máy chủ. Vui lòng tải lại tệp mới.",
+            },
+        )
+
+    doc.status = "processing"
+    doc.error_message = None
+    await db.commit()
+    await db.refresh(doc)
+
+    background_tasks.add_task(process_document_background, doc.id)
+
+    return DocumentResponse(
+        id=doc.id,
+        course_id=doc.course_id,
+        title=doc.title,
+        file_size=doc.file_size,
+        mime_type=doc.mime_type,
+        status=doc.status,
+        error_message=doc.error_message,
+        created_at=doc.created_at,
+    )
+
+
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(document_id: UUID, db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, document_id)

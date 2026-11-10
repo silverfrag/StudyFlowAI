@@ -16,6 +16,7 @@ import com.studyflow.ai.data.model.QuizCreateRequest
 import com.studyflow.ai.data.model.QuizResponse
 import com.studyflow.ai.data.model.QuizSubmitRequest
 import com.studyflow.ai.data.model.QuizSubmitResponse
+import com.studyflow.ai.data.model.QuizSummaryResponse
 import com.studyflow.ai.data.model.RecommendationItem
 import com.studyflow.ai.data.model.StandardErrorEnvelope
 import org.junit.Assert.assertEquals
@@ -283,5 +284,41 @@ class ApiContractParsingTest {
         assertTrue(fallbackNull.isNotBlank())
         val fallbackInvalid = RetrofitClient.parseError("Internal Server Error 500")
         assertTrue(fallbackInvalid.isNotBlank())
+    }
+
+    @Test
+    fun parseCourseQuizSummaries() {
+        val summariesJson = """
+            [
+              {
+                "id": "q9f8e7d6-3333-4444-8555-666677778888",
+                "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+                "title": "Quiz: Quy trình kiểm thử",
+                "total_questions": 5,
+                "attempt_count": 0,
+                "latest_score": null,
+                "created_at": "2026-11-10T08:00:00Z"
+              },
+              {
+                "id": "q2222222-3333-4444-8555-666677778888",
+                "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+                "title": "Quiz: Test Case & Kỹ thuật hộp đen",
+                "total_questions": 10,
+                "attempt_count": 2,
+                "latest_score": 8.5,
+                "created_at": "2026-11-10T08:30:00Z"
+              }
+            ]
+        """.trimIndent()
+        val listType = object : TypeToken<List<QuizSummaryResponse>>() {}.type
+        val summaries: List<QuizSummaryResponse> = gson.fromJson(summariesJson, listType)
+        assertEquals(2, summaries.size)
+        assertEquals(5, summaries[0].totalQuestions)
+        assertEquals(0, summaries[0].attemptCount)
+        assertNull(summaries[0].latestScore)
+        assertEquals(10, summaries[1].totalQuestions)
+        assertEquals(2, summaries[1].attemptCount)
+        assertNotNull(summaries[1].latestScore)
+        assertEquals(8.5, summaries[1].latestScore!!, 0.001)
     }
 }

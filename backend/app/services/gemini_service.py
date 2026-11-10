@@ -15,13 +15,15 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 _LEGACY_MODEL_MAP = {
-    "gemini-1.5-flash": "gemini-3.8-flash",
-    "gemini-1.5-flash-latest": "gemini-3.8-flash",
-    "gemini-1.5-pro": "gemini-3.8-flash",
-    "gemini-2.0-flash": "gemini-3.8-flash",
+    "gemini-1.5-flash": "gemini-3.5-flash-lite",
+    "gemini-1.5-flash-latest": "gemini-3.5-flash-lite",
+    "gemini-1.5-pro": "gemini-3.5-flash-lite",
+    "gemini-2.0-flash": "gemini-3.5-flash-lite",
     "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
-    "gemini-2.5-flash": "gemini-3.8-flash",
+    "gemini-2.5-flash": "gemini-3.5-flash-lite",
 }
+
+_DEFAULT_GENERATION_MODEL = "gemini-3.5-flash-lite"
 
 _LEGACY_EMBEDDING_MAP = {
     "text-embedding-004": "gemini-embedding-001",
@@ -51,10 +53,21 @@ def is_gemini_configured() -> bool:
 
 def resolve_generation_model() -> str:
     configured = (settings.GEMINI_MODEL or "").strip()
-    mapped = _LEGACY_MODEL_MAP.get(configured, configured or "gemini-3.8-flash")
+    mapped = _LEGACY_MODEL_MAP.get(configured, configured or _DEFAULT_GENERATION_MODEL)
     if mapped != configured and configured:
         logger.warning("Model '%s' đã cũ/không còn hỗ trợ; tự động chuyển sang '%s'.", configured, mapped)
     return mapped
+
+
+def resolve_generation_candidates() -> List[str]:
+    primary = resolve_generation_model()
+    raw_fallbacks = getattr(settings, "GEMINI_FALLBACK_MODELS", "") or ""
+    candidates: List[str] = [primary]
+    for item in raw_fallbacks.split(","):
+        cleaned = _LEGACY_MODEL_MAP.get(item.strip(), item.strip())
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+    return candidates
 
 
 def resolve_embedding_model() -> str:
@@ -197,42 +210,76 @@ async def generate_structured_json(
     system_instruction: str,
     schema_cls: Type[T],
 ) -> T:
-    """Gọi Gemini Interactions API ép đầu ra JSON theo schema và validate bằng Pydantic."""
+    """Gọi Gemini Interactions API ép đầu ra JSON theo schema và validate bằng Pydantic (kèm fallback khi chậm)."""
     client = get_genai_client()
-    model = resolve_generation_model()
+    candidates = resolve_generation_candidates()
     json_schema = inline_json_schema(schema_cls.model_json_schema())
 
-    try:
-        interaction = await asyncio.wait_for(
-            client.aio.interactions.create(
-                model=model,
-                system_instruction=system_instruction,
-                input=prompt,
-                store=False,
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": json_schema,
-                },
-            ),
-            timeout=settings.GEMINI_TIMEOUT_SECONDS,
+    last_error_message = "Dịch vụ Gemini AI hiện không khả dụng hoặc hết hạn mức."
+    for idx, model in enumerate(candidates):
+        has_fallback = idx < len(candidates) - 1
+        per_attempt_timeout = (
+            min(float(settings.GEMINI_TIMEOUT_SECONDS), 18.0)
+            if has_fallback
+            else float(settings.GEMINI_TIMEOUT_SECONDS)
         )
-    except asyncio.TimeoutError as exc:
-        logger.warning("Gemini interactions.create timeout sau %.1fs", settings.GEMINI_TIMEOUT_SECONDS)
-        raise AIServiceError("Dịch vụ AI phản hồi quá chậm. Vui lòng thử lại sau.") from exc
-    except AIServiceError:
-        raise
-    except Exception as exc:
-        logger.warning("Lỗi gọi Gemini interactions.create: %s", type(exc).__name__)
-        raise AIServiceError("Dịch vụ Gemini AI hiện không khả dụng hoặc hết hạn mức.") from exc
+        try:
+            interaction = await asyncio.wait_for(
+                client.aio.interactions.create(
+                    model=model,
+                    system_instruction=system_instruction,
+                    input=prompt,
+                    store=False,
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": json_schema,
+                    },
+                ),
+                timeout=per_attempt_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            logger.warning(
+                "Gemini interactions.create (%s) timeout sau %.1fs",
+                model,
+                per_attempt_timeout,
+            )
+            last_error_message = "Dịch vụ AI phản hồi quá chậm. Vui lòng thử lại sau."
+            if has_fallback:
+                continue
+            raise AIServiceError(last_error_message) from exc
+        except AIServiceError:
+            raise
+        except Exception as exc:
+            logger.warning("Lỗi gọi Gemini interactions.create (%s): %s", model, type(exc).__name__)
+            last_error_message = "Dịch vụ Gemini AI hiện không khả dụng hoặc hết hạn mức."
+            if has_fallback:
+                continue
+            raise AIServiceError(last_error_message) from exc
 
-    raw_text = extract_interaction_text(interaction)
-    if not raw_text.strip():
-        raise AIServiceError("Dịch vụ AI không trả về nội dung hợp lệ.")
+        interaction_status = getattr(interaction, "status", None)
+        if interaction_status in ("failed", "cancelled"):
+            logger.warning("Gemini interaction (%s) kết thúc với status=%s", model, interaction_status)
+            last_error_message = "Dịch vụ AI xử lý yêu cầu không thành công. Vui lòng thử lại."
+            if has_fallback:
+                continue
+            raise AIServiceError(last_error_message)
 
-    cleaned_json = _strip_json_fences(raw_text)
-    try:
-        return schema_cls.model_validate_json(cleaned_json)
-    except (ValidationError, json.JSONDecodeError) as exc:
-        logger.warning("Gemini JSON output không khớp schema %s: %s", schema_cls.__name__, type(exc).__name__)
-        raise AIServiceError("Dữ liệu AI trả về không đúng định dạng cấu trúc yêu cầu.") from exc
+        raw_text = extract_interaction_text(interaction)
+        if not raw_text.strip():
+            last_error_message = "Dịch vụ AI không trả về nội dung hợp lệ."
+            if has_fallback:
+                continue
+            raise AIServiceError(last_error_message)
+
+        cleaned_json = _strip_json_fences(raw_text)
+        try:
+            return schema_cls.model_validate_json(cleaned_json)
+        except (ValidationError, json.JSONDecodeError) as exc:
+            logger.warning("Gemini JSON output (%s) không khớp schema %s: %s", model, schema_cls.__name__, type(exc).__name__)
+            last_error_message = "Dữ liệu AI trả về không đúng định dạng cấu trúc yêu cầu."
+            if has_fallback:
+                continue
+            raise AIServiceError(last_error_message) from exc
+
+    raise AIServiceError(last_error_message)

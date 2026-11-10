@@ -70,9 +70,9 @@ Tổng hợp `correct_count / answered_count` theo topic từ kết quả đã l
 Danh sách dưới đây là phạm vi khái niệm để chia việc; trước khi triển khai phải thống nhất path, field, validation, status/error và schema JSON chi tiết. Thay đổi phải được thống nhất trước và cập nhật tài liệu cùng PR.
 
 - `GET/POST/PATCH/DELETE /courses`
-- `GET/POST/DELETE /courses/{courseId}/documents` (upload multipart; trả trạng thái xử lý)
+- `GET/POST/DELETE /courses/{courseId}/documents` & `POST /documents/{documentId}/retry` (upload multipart; trả trạng thái xử lý; cho phép thử xử lý lại khi lỗi)
 - `POST /assistant/ask` (question + course/document context → answer + citations)
-- `POST /quizzes` (course/topic/count → validated quiz)
+- `GET /courses/{courseId}/quizzes` & `POST /quizzes` (liệt kê quiz theo môn; course/topic/count → validated quiz)
 - `POST /quizzes/{quizId}/submit` (answers → deterministic result)
 - `GET /progress` và `GET /recommendations`
 

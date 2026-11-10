@@ -1,10 +1,13 @@
 package com.studyflow.ai.ui.screens.assistant
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.*
@@ -13,22 +16,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.LoadingStateView
 import com.studyflow.ai.ui.theme.StudyFlowTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AssistantScreen(
     preferredCourseId: String? = null,
     onNavigateToCourses: () -> Unit,
     viewModel: AssistantViewModel = viewModel()
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     val courses by viewModel.courses.collectAsState()
     val selectedCourse by viewModel.selectedCourse.collectAsState()
     val documents by viewModel.documents.collectAsState()
@@ -40,10 +48,26 @@ fun AssistantScreen(
     var inputText by remember { mutableStateOf("") }
     var courseMenuExpanded by remember { mutableStateOf(false) }
     var docMenuExpanded by remember { mutableStateOf(false) }
+    var skipNextResume by remember { mutableStateOf(true) }
+    val latestPreferredCourseId by rememberUpdatedState(preferredCourseId)
     val listState = rememberLazyListState()
 
     LaunchedEffect(preferredCourseId) {
-        viewModel.loadCourses(preferredCourseId)
+        viewModel.loadCourses(preferredCourseId, silent = courses.isNotEmpty())
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (skipNextResume) {
+                    skipNextResume = false
+                } else {
+                    viewModel.loadCourses(latestPreferredCourseId, silent = true)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(messages.size) {
@@ -62,7 +86,10 @@ fun AssistantScreen(
                             Icon(Icons.Outlined.DeleteSweep, contentDescription = "Xóa hội thoại")
                         }
                     }
-                    IconButton(onClick = { viewModel.loadCourses(preferredCourseId) }, enabled = !isAsking) {
+                    IconButton(
+                        onClick = { viewModel.loadCourses(preferredCourseId, silent = courses.isNotEmpty()) },
+                        enabled = !isAsking
+                    ) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
                     }
                 },
@@ -166,10 +193,68 @@ fun AssistantScreen(
                 // Danh sách tin nhắn
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (messages.isEmpty()) {
-                        EmptyStateView(
-                            title = "Hỏi đáp theo tài liệu",
-                            description = "Đặt câu hỏi về kiến thức trong môn '${selectedCourse?.name ?: ""}'. Trợ lý sẽ trả lời kèm nguồn trích dẫn xác thực."
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(56.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Hỏi đáp theo tài liệu",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Đặt câu hỏi về kiến thức trong môn '${selectedCourse?.name ?: ""}'. Trợ lý sẽ trả lời kèm nguồn trích dẫn xác thực.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            if (documents.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(18.dp))
+                                Text(
+                                    text = "Gợi ý câu hỏi nhanh:",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                val suggestions = listOf(
+                                    "Tóm tắt nội dung chính",
+                                    "Liệt kê khái niệm quan trọng",
+                                    "Giải thích quy trình cốt lõi"
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    suggestions.forEach { prompt ->
+                                        SuggestionChip(
+                                            onClick = { viewModel.askQuestion(prompt) },
+                                            enabled = !isAsking && selectedCourse != null,
+                                            label = { Text(prompt) },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.QuestionAnswer,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         LazyColumn(
                             state = listState,
@@ -335,6 +420,7 @@ private fun ChatBubble(
 }
 
 @Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ChatBubblePreview() {
     StudyFlowTheme {
