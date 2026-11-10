@@ -17,7 +17,8 @@ data class ChatMessage(
     val text: String,
     val foundInContext: Boolean = true,
     val citations: List<Citation> = emptyList(),
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    val retryQuestion: String? = null
 )
 
 class AssistantViewModel(
@@ -89,17 +90,33 @@ class AssistantViewModel(
         _selectedDocument.value = document
     }
 
+    fun clearMessages() {
+        _messages.value = emptyList()
+    }
+
+    fun retryQuestion(errorMessageId: String, questionText: String) {
+        if (_isAsking.value) return
+        _messages.value = _messages.value.filterNot { it.id == errorMessageId }
+        askQuestionInternal(questionText, appendUserMessage = false)
+    }
+
     fun askQuestion(questionText: String) {
+        askQuestionInternal(questionText, appendUserMessage = true)
+    }
+
+    private fun askQuestionInternal(questionText: String, appendUserMessage: Boolean) {
         val course = _selectedCourse.value ?: return
         val trimmed = questionText.trim()
         if (trimmed.isEmpty() || _isAsking.value) return
 
-        val userMsg = ChatMessage(
-            id = "u-${System.currentTimeMillis()}",
-            isUser = true,
-            text = trimmed
-        )
-        _messages.value = _messages.value + userMsg
+        if (appendUserMessage) {
+            val userMsg = ChatMessage(
+                id = "u-${System.currentTimeMillis()}",
+                isUser = true,
+                text = trimmed
+            )
+            _messages.value = _messages.value + userMsg
+        }
         _isAsking.value = true
 
         viewModelScope.launch {
@@ -121,7 +138,8 @@ class AssistantViewModel(
                         isUser = false,
                         text = err.message ?: "Không thể kết nối trợ lý AI.",
                         foundInContext = false,
-                        isError = true
+                        isError = true,
+                        retryQuestion = trimmed
                     )
                     _messages.value = _messages.value + errMsg
                     _isAsking.value = false

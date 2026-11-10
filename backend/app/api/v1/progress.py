@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, Integer
 from typing import List
 
 from app.core.database import get_db
@@ -64,7 +64,7 @@ async def get_recommendations(db: AsyncSession = Depends(get_db)):
             Question.topic,
             Quiz.course_id,
             func.count(Answer.id).label("total_answered"),
-            func.sum(func.cast(Answer.is_correct, func.integer)).label("correct_count"),
+            func.sum(func.cast(Answer.is_correct, Integer)).label("correct_count"),
         )
         .join(Question, Answer.question_id == Question.id)
         .join(Quiz, Question.quiz_id == Quiz.id)

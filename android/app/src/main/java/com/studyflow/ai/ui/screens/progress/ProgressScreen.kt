@@ -34,6 +34,7 @@ fun ProgressScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isStartingPractice by viewModel.isStartingPractice.collectAsState()
+    val practiceError by viewModel.practiceError.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.loadProgress()
@@ -123,6 +124,34 @@ fun ProgressScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+
+                            practiceError?.let { errMsg ->
+                                item {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = errMsg,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(onClick = { viewModel.clearPracticeError() }) {
+                                                Text("Đóng")
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             if (recommendations.isEmpty()) {

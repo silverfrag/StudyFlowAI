@@ -70,6 +70,13 @@ class QuizViewModel(
         }
     }
 
+    fun jumpToQuestion(index: Int) {
+        val total = (_uiState.value as? QuizUiState.Success)?.quiz?.questions?.size ?: return
+        if (index in 0 until total) {
+            _currentIndex.value = index
+        }
+    }
+
     fun countUnanswered(): Int {
         val quiz = (_uiState.value as? QuizUiState.Success)?.quiz ?: return 0
         return quiz.questions.count { !_selectedAnswers.value.containsKey(it.id) }

@@ -10,7 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 
 @Composable
 fun LoadingStateView(message: String = "Đang tải dữ liệu...") {
@@ -111,6 +113,30 @@ fun ErrorStateView(
                 Text("Thử lại")
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun EmptyStatePreview() {
+    StudyFlowTheme {
+        EmptyStateView(
+            title = "Chưa có môn học nào",
+            description = "Hãy tạo môn học đầu tiên và tải tài liệu lên để AI đồng hành cùng bạn.",
+            actionLabel = "Tạo môn học ngay",
+            onActionClick = {}
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ErrorStatePreview() {
+    StudyFlowTheme {
+        ErrorStateView(
+            message = "Không thể kết nối đến máy chủ.",
+            onRetry = {}
+        )
     }
 }
 

@@ -12,14 +12,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.studyflow.ai.data.model.QuestionResultDetail
 import com.studyflow.ai.data.model.QuizSubmitResponse
+import com.studyflow.ai.data.model.SourceCitation
+import com.studyflow.ai.data.model.TopicStat
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.theme.ErrorRed
 import com.studyflow.ai.ui.theme.ErrorRedBg
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 import com.studyflow.ai.ui.theme.SuccessGreen
 import com.studyflow.ai.ui.theme.SuccessGreenBg
+import com.studyflow.ai.ui.theme.WarningAmber
+import com.studyflow.ai.ui.theme.WarningAmberBg
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,6 +96,7 @@ fun ResultScreen(
                     }
                     items(result.topicStats) { stat ->
                         val percent = (stat.accuracy * 100).toInt()
+                        val isWeak = stat.accuracy < 0.60
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
@@ -98,26 +105,75 @@ fun ResultScreen(
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
                                         text = stat.topic,
                                         style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    if (isWeak) {
+                                        Surface(
+                                            color = WarningAmberBg,
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "Cần ôn tập",
+                                                color = WarningAmber,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = "$percent% (${stat.correctCount}/${stat.totalQuestions})",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (stat.accuracy < 0.6) ErrorRed else SuccessGreen
+                                        color = if (isWeak) ErrorRed else SuccessGreen
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 LinearProgressIndicator(
                                     progress = { stat.accuracy.toFloat() },
                                     modifier = Modifier.fillMaxWidth().height(6.dp),
-                                    color = if (stat.accuracy < 0.6) ErrorRed else SuccessGreen
+                                    color = if (isWeak) ErrorRed else SuccessGreen
                                 )
+                            }
+                        }
+                    }
+
+                    val weakTopics = result.topicStats.filter { it.accuracy < 0.60 }
+                    if (weakTopics.isNotEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = WarningAmberBg)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(
+                                        text = "Gợi ý ôn tập",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = WarningAmber
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Bạn đạt dưới 60% ở: ${weakTopics.joinToString(", ") { it.topic }}. Mở Tiến độ để xem tài liệu và làm quiz củng cố.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    FilledTonalButton(
+                                        onClick = onNavigateToProgress,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Xem gợi ý ôn tập")
+                                    }
+                                }
                             }
                         }
                     }
@@ -219,6 +275,41 @@ private fun QuestionResultCard(detail: QuestionResultDetail) {
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ResultScreenPreview() {
+    StudyFlowTheme {
+        ResultScreen(
+            result = QuizSubmitResponse(
+                attemptId = "att-1",
+                quizId = "q-1",
+                score = 8.0,
+                totalQuestions = 10,
+                correctCount = 8,
+                incorrectCount = 2,
+                submittedAt = "2026-11-10T07:00:00Z",
+                topicStats = listOf(
+                    TopicStat("Khóa chính/ngoại khóa", 5, 5, 1.0),
+                    TopicStat("Phép JOIN", 4, 2, 0.5)
+                ),
+                details = listOf(
+                    QuestionResultDetail(
+                        questionId = "q1",
+                        prompt = "Thuộc tính khóa chính có thể nhận NULL không?",
+                        selectedOptionId = "B",
+                        correctOptionId = "B",
+                        isCorrect = true,
+                        explanation = "Khóa chính luôn NOT NULL và duy nhất.",
+                        citation = SourceCitation("Giao_trinh_CSDL.pdf", 12)
+                    )
+                )
+            ),
+            onNavigateToHome = {},
+            onNavigateToProgress = {}
+        )
     }
 }
 

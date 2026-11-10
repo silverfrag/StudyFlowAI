@@ -39,6 +39,9 @@ class CourseDetailViewModel(
     private val _actionMessage = MutableStateFlow<String?>(null)
     val actionMessage: StateFlow<String?> = _actionMessage.asStateFlow()
 
+    private val _quizError = MutableStateFlow<String?>(null)
+    val quizError: StateFlow<String?> = _quizError.asStateFlow()
+
     fun loadCourseDetail(courseId: String) {
         viewModelScope.launch {
             _uiState.value = CourseDetailUiState.Loading
@@ -133,7 +136,7 @@ class CourseDetailViewModel(
     ) {
         viewModelScope.launch {
             _isCreatingQuiz.value = true
-            _actionMessage.value = null
+            _quizError.value = null
             repository.createQuiz(
                 courseId = courseId,
                 documentId = null,
@@ -144,13 +147,17 @@ class CourseDetailViewModel(
                 onQuizCreated(quiz)
             }.onFailure { err ->
                 _isCreatingQuiz.value = false
-                _actionMessage.value = err.message ?: "Không thể tạo bài kiểm tra."
+                _quizError.value = err.message ?: "Không thể tạo bài kiểm tra."
             }
         }
     }
 
     fun clearMessage() {
         _actionMessage.value = null
+    }
+
+    fun clearQuizError() {
+        _quizError.value = null
     }
 }
 

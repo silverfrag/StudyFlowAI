@@ -42,6 +42,11 @@ fun CoursesScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Môn học", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { viewModel.loadCourses() }) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )

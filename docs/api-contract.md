@@ -11,7 +11,7 @@ Tài liệu này xác định hợp đồng giao tiếp giữa **Android Client*
   - Chạy giao thức **HTTP** (không mã hóa) để thuận tiện debug:
     - Android Emulator truy cập backend host: `http://10.0.2.2:8000/api/v1`
     - Thiết bị Android thật qua mạng LAN: `http://<LAN_IP>:8000/api/v1`
-  - *Yêu cầu cấu hình Android:* Bật `android:usesCleartextTraffic="true"` trong `AndroidManifest.xml` (hoặc cấu hình `network_security_config.xml` cho phép domain local) ở môi trường debug.
+  - *Yêu cầu cấu hình Android:* Bật `android:usesCleartextTraffic="true"` trong `AndroidManifest.xml` (hoặc cấu hình `network_security_config.xml` cho phép domain local) ở môi trường debug. Trên emulator/thiết bị **Android 17 (API 37+)**, giữ `targetSdk = 36` (hoặc xin quyền runtime `ACCESS_LOCAL_NETWORK` nếu nâng lên `targetSdk >= 37`) để tránh hệ thống chặn lưu lượng tới `10.0.2.2` và mạng LAN cục bộ.
 - **Môi trường triển khai / Máy chủ thật (Staging / Production):**
   - Bắt buộc sử dụng giao thức **HTTPS** với chứng chỉ TLS/SSL hợp lệ.
   - Vô hiệu hóa cleartext traffic trên Android client release build.

@@ -30,9 +30,13 @@ class ProgressViewModel(
     private val _isStartingPractice = MutableStateFlow(false)
     val isStartingPractice: StateFlow<Boolean> = _isStartingPractice.asStateFlow()
 
+    private val _practiceError = MutableStateFlow<String?>(null)
+    val practiceError: StateFlow<String?> = _practiceError.asStateFlow()
+
     fun loadProgress() {
         viewModelScope.launch {
             _uiState.value = ProgressUiState.Loading
+            _practiceError.value = null
             val summaryRes = repository.getProgressSummary()
             val recRes = repository.getRecommendations()
 
@@ -57,15 +61,21 @@ class ProgressViewModel(
     ) {
         viewModelScope.launch {
             _isStartingPractice.value = true
+            _practiceError.value = null
             repository.createQuiz(courseId = courseId, documentId = null, topic = topic, count = 5)
                 .onSuccess { quiz ->
                     _isStartingPractice.value = false
                     onQuizCreated(quiz)
                 }
-                .onFailure {
+                .onFailure { err ->
                     _isStartingPractice.value = false
+                    _practiceError.value = err.message ?: "Không thể tạo bài quiz luyện tập."
                 }
         }
+    }
+
+    fun clearPracticeError() {
+        _practiceError.value = null
     }
 }
 

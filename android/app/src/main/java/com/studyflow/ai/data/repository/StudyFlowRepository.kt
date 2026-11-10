@@ -1,5 +1,6 @@
 package com.studyflow.ai.data.repository
 
+import com.studyflow.ai.BuildConfig
 import com.studyflow.ai.data.api.RetrofitClient
 import com.studyflow.ai.data.model.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -7,15 +8,18 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 import java.io.InputStream
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 
 class StudyFlowRepository {
     private val api = RetrofitClient.apiService
 
     private fun extractError(e: Exception): String {
-        return if (e is HttpException) {
-            RetrofitClient.parseError(e.response()?.errorBody()?.string())
-        } else {
-            e.localizedMessage ?: "Không thể kết nối đến máy chủ."
+        return when (e) {
+            is HttpException -> RetrofitClient.parseError(e.response()?.errorBody()?.string())
+            is ConnectException, is SocketTimeoutException ->
+                "Không thể kết nối tới Backend (${BuildConfig.API_BASE_URL}). Hãy đảm bảo Docker Postgres và uvicorn đang chạy."
+            else -> e.localizedMessage ?: "Không thể kết nối đến máy chủ."
         }
     }
 

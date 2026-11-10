@@ -16,12 +16,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.ProgressSummaryResponse
+import com.studyflow.ai.data.model.RecentActivity
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
+import com.studyflow.ai.ui.theme.StudyFlowTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +56,11 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.loadSummary() }) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -163,6 +171,32 @@ private fun HomeContent(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (summary.totalQuizzesCompleted > 0) {
+                        val scoreRatio = (summary.averageScore / 10.0).toFloat().coerceIn(0f, 1f)
+                        val percent = (scoreRatio * 100).toInt()
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Tiến độ điểm TB",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "$percent% (${summary.averageScore}/10)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { scoreRatio },
+                            modifier = Modifier.fillMaxWidth().height(6.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = { onOpenCourseDetail(recent.courseId) },
@@ -282,6 +316,31 @@ private fun QuickActionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun HomeContentPreview() {
+    StudyFlowTheme {
+        HomeContent(
+            summary = ProgressSummaryResponse(
+                totalCourses = 4,
+                totalQuizzesCompleted = 12,
+                averageScore = 6.5,
+                recentActivity = RecentActivity(
+                    courseId = "c1",
+                    courseName = "Cơ sở dữ liệu",
+                    lastQuizTitle = "Chương 1: Khóa chính",
+                    lastScore = 8.0,
+                    lastActiveAt = "2026-11-10T07:00:00Z"
+                )
+            ),
+            onNavigateToCourses = {},
+            onNavigateToAssistant = {},
+            onNavigateToProgress = {},
+            onOpenCourseDetail = {}
+        )
     }
 }
 

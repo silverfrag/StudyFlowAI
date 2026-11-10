@@ -2,6 +2,8 @@ package com.studyflow.ai.ui.screens.quiz
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.data.model.QuizSubmitResponse
 import com.studyflow.ai.ui.components.EmptyStateView
@@ -75,7 +78,7 @@ fun QuizScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = String.format("%02d / %02d", currentIndex + 1, questions.size),
+                                        text = String.format(Locale.US, "%02d / %02d", currentIndex + 1, questions.size),
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
@@ -90,6 +93,41 @@ fun QuizScreen(
                                     progress = { (currentIndex + 1).toFloat() / questions.size },
                                     modifier = Modifier.fillMaxWidth().height(6.dp),
                                 )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                // Thanh nhảy nhanh giữa các câu hỏi (hiện rõ câu đang xem / đã trả lời / bỏ trống)
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(questions, key = { _, q -> q.id }) { idx, q ->
+                                        val isCurrent = idx == currentIndex
+                                        val isAnswered = selectedAnswers.containsKey(q.id)
+                                        val containerColor = when {
+                                            isCurrent -> MaterialTheme.colorScheme.primary
+                                            isAnswered -> MaterialTheme.colorScheme.primaryContainer
+                                            else -> MaterialTheme.colorScheme.surfaceVariant
+                                        }
+                                        val contentColor = when {
+                                            isCurrent -> MaterialTheme.colorScheme.onPrimary
+                                            isAnswered -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                        Surface(
+                                            onClick = { viewModel.jumpToQuestion(idx) },
+                                            enabled = !isSubmitting,
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = containerColor,
+                                            contentColor = contentColor
+                                        ) {
+                                            Text(
+                                                text = "${idx + 1}",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
 
                             // Nội dung câu hỏi & các lựa chọn
@@ -143,11 +181,33 @@ fun QuizScreen(
                                 }
 
                                 if (submitError != null) {
-                                    Text(
-                                        text = submitError!!,
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                text = submitError!!,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Các đáp án đã chọn vẫn được giữ nguyên. Nhấn 'Thử nộp lại' để gửi lại.",
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            OutlinedButton(
+                                                onClick = { viewModel.submitQuiz(onQuizSubmitted) },
+                                                enabled = !isSubmitting,
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Text("Thử nộp lại")
+                                            }
+                                        }
+                                    }
                                 }
                             }
 

@@ -8,7 +8,7 @@
 
 1. Mở **Android Studio**.
 2. Chọn **File → Open...** và trỏ đến thư mục `E:\StudyFlowAI\android` (lưu ý mở thư mục `android/`, không mở thư mục gốc `StudyFlowAI`).
-3. Chờ Gradle Sync hoàn tất (sử dụng Gradle `9.5.0`, AGP `9.3.3`, `compileSdk 37`).
+3. Chờ Gradle Sync hoàn tất (sử dụng Gradle `9.5.0`, AGP `9.3.3`, `compileSdk 37`, `targetSdk 36`).
 4. Khởi động **Android Emulator** và nhấn **Run (Shift + F10)**.
 
 ---

@@ -52,6 +52,16 @@ fun AssistantScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Trợ lý AI", fontWeight = FontWeight.Bold) },
+                actions = {
+                    if (messages.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.clearMessages() }, enabled = !isAsking) {
+                            Icon(Icons.Outlined.DeleteSweep, contentDescription = "Xóa hội thoại")
+                        }
+                    }
+                    IconButton(onClick = { viewModel.loadCourses(preferredCourseId) }, enabled = !isAsking) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
@@ -140,6 +150,13 @@ fun AssistantScreen(
                             }
                         }
                     }
+                } else {
+                    Text(
+                        text = "Môn này chưa có tài liệu nào ở trạng thái sẵn sàng. Bạn vẫn có thể hỏi thử hoặc tải PDF/TXT lên ở tab Môn học.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
                 }
 
                 // Danh sách tin nhắn
@@ -157,7 +174,14 @@ fun AssistantScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(messages, key = { it.id }) { msg ->
-                                ChatBubble(msg)
+                                ChatBubble(
+                                    message = msg,
+                                    onRetry = {
+                                        msg.retryQuestion?.let { q ->
+                                            viewModel.retryQuestion(msg.id, q)
+                                        }
+                                    }
+                                )
                             }
                             if (isAsking) {
                                 item {
@@ -216,7 +240,10 @@ fun AssistantScreen(
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun ChatBubble(
+    message: ChatMessage,
+    onRetry: (() -> Unit)? = null
+) {
     val align = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = when {
         message.isUser -> MaterialTheme.colorScheme.primary
@@ -244,7 +271,17 @@ private fun ChatBubble(message: ChatMessage) {
                     style = MaterialTheme.typography.bodyMedium
                 )
 
-                if (!message.isUser && !message.isError) {
+                if (message.isError && message.retryQuestion != null && onRetry != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRetry,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Thử lại")
+                    }
+                } else if (!message.isUser && !message.isError) {
                     if (!message.foundInContext) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(

@@ -44,6 +44,7 @@ fun CourseDetailScreen(
     val isUploading by viewModel.isUploading.collectAsState()
     val isCreatingQuiz by viewModel.isCreatingQuiz.collectAsState()
     val actionMessage by viewModel.actionMessage.collectAsState()
+    val quizError by viewModel.quizError.collectAsState()
 
     var showCreateQuizDialog by remember { mutableStateOf(false) }
     var docToDelete by remember { mutableStateOf<DocumentResponse?>(null) }
@@ -232,7 +233,11 @@ fun CourseDetailScreen(
     if (showCreateQuizDialog) {
         CreateQuizDialog(
             isCreating = isCreatingQuiz,
-            onDismiss = { showCreateQuizDialog = false },
+            error = quizError,
+            onDismiss = {
+                viewModel.clearQuizError()
+                showCreateQuizDialog = false
+            },
             onConfirm = { topic, count ->
                 viewModel.generateQuiz(courseId, topic, count) { quiz ->
                     showCreateQuizDialog = false
@@ -321,9 +326,12 @@ private fun DocumentCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                if (doc.status == "error" && !doc.errorMessage.isNullOrBlank()) {
+                if (doc.status == "error") {
+                    val msg = doc.errorMessage?.takeIf { it.isNotBlank() }
+                        ?: "Trích xuất thất bại. Vui lòng xóa và tải lại tệp hợp lệ."
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = doc.errorMessage,
+                        text = msg,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -343,6 +351,7 @@ private fun DocumentCard(
 @Composable
 private fun CreateQuizDialog(
     isCreating: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onConfirm: (String?, Int) -> Unit
 ) {
@@ -374,6 +383,20 @@ private fun CreateQuizDialog(
                         valueRange = 3f..10f,
                         steps = 6
                     )
+                }
+                if (!error.isNullOrBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
                 }
             }
         },
