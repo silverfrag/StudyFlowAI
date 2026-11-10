@@ -6,6 +6,7 @@ import com.studyflow.ai.data.api.RetrofitClient
 import com.studyflow.ai.data.model.AnswerSubmission
 import com.studyflow.ai.data.model.AskRequest
 import com.studyflow.ai.data.model.AskResponse
+import com.studyflow.ai.data.model.ChatHistoryItem
 import com.studyflow.ai.data.model.CourseCreateRequest
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.data.model.DocumentResponse
@@ -272,6 +273,20 @@ class ApiContractParsingTest {
         assertTrue(askReqJson.contains("\"course_id\""))
         assertTrue(askReqJson.contains("\"document_id\""))
         assertTrue(askReqJson.contains("\"question\""))
+
+        val askWithHistoryReq = AskRequest(
+            courseId = "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
+            documentId = null,
+            question = "Cho ví dụ cụ thể hơn",
+            history = listOf(
+                ChatHistoryItem(role = "user", content = "Khóa chính là gì?"),
+                ChatHistoryItem(role = "assistant", content = "Khóa chính dùng để định danh duy nhất mỗi bộ.")
+            )
+        )
+        val askWithHistoryJson = gson.toJson(askWithHistoryReq)
+        assertTrue(askWithHistoryJson.contains("\"history\""))
+        assertTrue(askWithHistoryJson.contains("\"role\":\"user\""))
+        assertTrue(askWithHistoryJson.contains("\"role\":\"assistant\""))
 
         val quizReq = QuizCreateRequest(
             courseId = "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",

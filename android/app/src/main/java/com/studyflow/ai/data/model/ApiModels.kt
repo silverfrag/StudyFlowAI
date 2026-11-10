@@ -60,10 +60,16 @@ data class DocumentStatusResponse(
 )
 
 // --- Assistant RAG (UC03) ---
+data class ChatHistoryItem(
+    val role: String, // "user" | "assistant"
+    val content: String
+)
+
 data class AskRequest(
     @SerializedName("course_id") val courseId: String,
     @SerializedName("document_id") val documentId: String? = null,
-    val question: String
+    val question: String,
+    val history: List<ChatHistoryItem> = emptyList()
 )
 
 data class Citation(

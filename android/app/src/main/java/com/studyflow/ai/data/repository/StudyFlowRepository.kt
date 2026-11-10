@@ -108,8 +108,13 @@ class StudyFlowRepository {
         Result.failure(Exception(extractError(e)))
     }
 
-    suspend fun askAssistant(courseId: String, documentId: String?, question: String): Result<AskResponse> = try {
-        Result.success(api.askAssistant(AskRequest(courseId, documentId, question)))
+    suspend fun askAssistant(
+        courseId: String,
+        documentId: String?,
+        question: String,
+        history: List<ChatHistoryItem> = emptyList()
+    ): Result<AskResponse> = try {
+        Result.success(api.askAssistant(AskRequest(courseId, documentId, question, history)))
     } catch (e: Exception) {
         Result.failure(Exception(extractError(e)))
     }

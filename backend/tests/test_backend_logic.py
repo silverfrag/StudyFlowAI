@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import List, Optional
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from google.genai import errors as genai_errors
@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.main import app
 from app.models.document import Document
+from app.schemas.assistant import ChatHistoryMessage
 from app.services import (
     document_service,
     gemini_service,
@@ -228,6 +229,51 @@ class PureBackendUnitTests(unittest.TestCase):
         self.assertIn("Trang 36", msg)
         self.assertIn("Chuong2_STLC.pdf", msg)
         self.assertIn("Retest/Verified", msg)
+
+    def test_rag_query_classification_and_text_helpers(self):
+        self.assertTrue(rag_service._is_overview_query("Tóm tắt nội dung chính từng tài liệu"))
+        self.assertTrue(rag_service._is_overview_query("Tổng hợp các khái niệm quan trọng nhất"))
+        self.assertFalse(rag_service._is_overview_query("Độ phức tạp Cyclomatic là gì?"))
+
+        self.assertTrue(rag_service._is_followup_question("Giải thích chi tiết hơn"))
+        self.assertTrue(rag_service._is_followup_question("Cho ví dụ cụ thể từ phần trên"))
+        self.assertFalse(
+            rag_service._is_followup_question("Quy trình kiểm thử phần mềm STLC bao gồm những giai đoạn nào?")
+        )
+
+        history = [
+            ChatHistoryMessage(role="user", content="Kỹ thuật phân vùng tương đương trong Chương 2"),
+            ChatHistoryMessage(role="assistant", content="Là kỹ thuật chia miền đầu vào thành các lớp."),
+        ]
+        rewritten = rag_service._build_retrieval_query("Cho ví dụ cụ thể", history)
+        self.assertIn("phân vùng tương đương", rewritten)
+        self.assertIn("Cho ví dụ cụ thể", rewritten)
+
+        self.assertIn("nguyennhangayraloiphanmem", rag_service._compact_alnum("Cácnguyênnhângâyralỗiphầnmềm"))
+
+        doc3 = Document(id=uuid4(), course_id=uuid4(), title="Chương 3_Whitebox.pdf", file_path="x", file_size=1, mime_type="application/pdf")
+        doc42 = Document(id=uuid4(), course_id=uuid4(), title="Chương 4-2_Định vị web.pdf", file_path="y", file_size=1, mime_type="application/pdf")
+        self.assertEqual(rag_service._find_mentioned_doc_ids("Hỏi về Chương 3", [doc3, doc42]), {doc3.id})
+        self.assertEqual(rag_service._find_mentioned_doc_ids("Trong chương 4-2 có gì?", [doc3, doc42]), {doc42.id})
+
+        raw_ans = (
+            "## Kết quả ([ĐOẠN 0, ĐOẠN 1])\n"
+            "Công thức: $CC = E - N + 2P$ và $2 \\times 3 \\leq 6$.\n"
+            "---\n"
+            "Mẹo DevTools dùng `$0` vẫn giữ nguyên.\n"
+            "```python\n"
+            "    if x > 0:\n"
+            "        print(x)\n"
+            "```"
+        )
+        cleaned = rag_service._clean_rag_answer(raw_ans)
+        self.assertNotIn("ĐOẠN", cleaned)
+        self.assertNotIn("$CC", cleaned)
+        self.assertIn("CC = E - N + 2P", cleaned)
+        self.assertIn("2 × 3 ≤ 6", cleaned)
+        self.assertIn("`$0`", cleaned)
+        self.assertIn("    if x > 0:", cleaned)
+        self.assertNotIn("\n---\n", cleaned)
 
 
 class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -871,6 +917,78 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             scoped_llm = [r for r in r1.json() if r["course_id"] == c_id]
             self.assertEqual(len(scoped_llm), 2)
             self.assertIn("Lời khuyên AI", scoped_llm[0]["recommended_action"])
+
+    async def test_multi_document_overview_rag_and_followup_history(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            c_res = await client.post("/api/v1/courses", json={"name": "__TEST_MULTI_RAG__"})
+            self.assertEqual(c_res.status_code, 201, c_res.text)
+            c_id = c_res.json()["id"]
+            self.created_course_ids.append(c_id)
+
+            pdf1 = _build_minimal_pdf_bytes("Chapter 1 Overview: Software Testing principles, bug severity and priority.")
+            pdf2 = _build_minimal_pdf_bytes("Chapter 2 STLC: Planning, Test Design, Execution and Closure phases.")
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.2)])):
+                u1 = await client.post(
+                    f"/api/v1/courses/{c_id}/documents",
+                    files={"file": ("Chuong1_TongQuan.pdf", pdf1, "application/pdf")},
+                )
+            with patch("app.services.document_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.8)])):
+                u2 = await client.post(
+                    f"/api/v1/courses/{c_id}/documents",
+                    files={"file": ("Chuong2_STLC.pdf", pdf2, "application/pdf")},
+                )
+            self.assertEqual(u1.status_code, 202, u1.text)
+            self.assertEqual(u2.status_code, 202, u2.text)
+
+            captured_prompts: List[str] = []
+
+            async def _fake_rag_overview(*, prompt, system_instruction, schema_cls, timeout_seconds=None):
+                captured_prompts.append(prompt)
+                return rag_service._RagLLMOutput(
+                    found_in_context=True,
+                    answer="## Tổng hợp ([ĐOẠN 0, ĐOẠN 1])\n- Chương 1: Nguyên lý kiểm thử.\n- Chương 2: Quy trình STLC.",
+                    cited_indices=[0, 1],
+                )
+
+            with patch("app.services.rag_service.embed_texts", new=AsyncMock(return_value=[_deterministic_vec(0.2)])), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag_overview)):
+                ov_res = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={"course_id": c_id, "document_id": None, "question": "Tóm tắt nội dung chính từng tài liệu"},
+                )
+            self.assertEqual(ov_res.status_code, 200, ov_res.text)
+            ov_body = ov_res.json()
+            self.assertTrue(ov_body["found_in_context"])
+            self.assertNotIn("[ĐOẠN", ov_body["answer"])
+            self.assertEqual(len(ov_body["citations"]), 2)
+            cited_titles = {c["document_title"] for c in ov_body["citations"]}
+            self.assertEqual(cited_titles, {"Chuong1_TongQuan.pdf", "Chuong2_STLC.pdf"})
+            self.assertIn("Chuong1_TongQuan.pdf", captured_prompts[-1])
+            self.assertIn("Chuong2_STLC.pdf", captured_prompts[-1])
+
+            # Kiểm tra câu hỏi nối tiếp kèm history -> phải rewrite query nhúng & truyền history vào prompt
+            mock_embed = AsyncMock(return_value=[_deterministic_vec(0.8)])
+            with patch("app.services.rag_service.embed_texts", new=mock_embed), \
+                 patch("app.services.rag_service.generate_structured_json", new=AsyncMock(side_effect=_fake_rag_overview)):
+                fu_res = await client.post(
+                    "/api/v1/assistant/ask",
+                    json={
+                        "course_id": c_id,
+                        "document_id": None,
+                        "question": "Giải thích chi tiết hơn",
+                        "history": [
+                            {"role": "user", "content": "Quy trình STLC trong Chương 2 gồm những bước nào?"},
+                            {"role": "assistant", "content": "STLC gồm các pha lập kế hoạch, thiết kế, thực thi và đóng."},
+                        ],
+                    },
+                )
+            self.assertEqual(fu_res.status_code, 200, fu_res.text)
+            embedded_query_arg = mock_embed.call_args[0][0][0]
+            self.assertIn("STLC", embedded_query_arg)
+            self.assertIn("Ngữ cảnh hội thoại gần đây", captured_prompts[-1])
 
 
 if __name__ == "__main__":

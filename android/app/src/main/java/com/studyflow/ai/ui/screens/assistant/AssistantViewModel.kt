@@ -2,6 +2,7 @@ package com.studyflow.ai.ui.screens.assistant
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.studyflow.ai.data.model.ChatHistoryItem
 import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.data.model.CourseResponse
 import com.studyflow.ai.data.model.DocumentResponse
@@ -156,6 +157,16 @@ class AssistantViewModel(
         if (trimmed.isEmpty() || _askingCourseIds.value.contains(course.id)) return
         val documentId = _selectedDocument.value?.id
 
+        val historyPayload = _messagesByCourse.value[course.id].orEmpty()
+            .filter { !it.isError && it.text.isNotBlank() }
+            .takeLast(4)
+            .map {
+                ChatHistoryItem(
+                    role = if (it.isUser) "user" else "assistant",
+                    content = it.text.take(1500)
+                )
+            }
+
         if (appendUserMessage) {
             val userMsg = ChatMessage(
                 id = "u-${System.currentTimeMillis()}",
@@ -167,7 +178,7 @@ class AssistantViewModel(
         _askingCourseIds.value = _askingCourseIds.value + course.id
 
         viewModelScope.launch {
-            repository.askAssistant(course.id, documentId, trimmed)
+            repository.askAssistant(course.id, documentId, trimmed, historyPayload)
                 .onSuccess { res ->
                     val aiMsg = ChatMessage(
                         id = "a-${System.currentTimeMillis()}",

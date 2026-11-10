@@ -214,16 +214,26 @@ Xóa tài liệu và các vector chunks liên quan.
 ### 4.4 Trợ lý học tập AI dẫn nguồn RAG (Assistant - UC03)
 
 #### `POST /api/v1/assistant/ask`
-Hỏi đáp theo tài liệu đã nạp.
+Hỏi đáp chuyên sâu theo tài liệu đã nạp (hỗ trợ truy vấn lai pgvector + lexical, tổng hợp đa tài liệu và ngữ cảnh hội thoại nối tiếp tùy chọn).
 - **Request Body:**
 ```json
 {
   "course_id": "c1f7a28b-1111-4222-8333-d4e5f6a7b8c9",
   "document_id": "d3a2e104-5555-4666-8777-1a2b3c4d5e6f",
-  "question": "Khóa chính là gì và điều kiện của nó?"
+  "question": "Khóa chính là gì và điều kiện của nó?",
+  "history": [
+    {
+      "role": "user",
+      "content": "Tóm tắt nội dung chính Chương 1"
+    },
+    {
+      "role": "assistant",
+      "content": "Chương 1 giới thiệu mô hình quan hệ, khóa chính và khóa ngoại..."
+    }
+  ]
 }
 ```
-*(Nếu muốn hỏi trên toàn bộ tài liệu của môn học, truyền `document_id: null`)*
+*(Nếu muốn hỏi trên toàn bộ tài liệu của môn học, truyền `document_id: null`. Trường `history` là tùy chọn, mặc định `[]`)*
 
 - **Response:** `200 OK`
 ```json

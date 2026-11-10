@@ -18,6 +18,7 @@ async def ask_assistant(payload: AskRequest, db: AsyncSession = Depends(get_db))
             document_id=payload.document_id,
             question=payload.question,
             db=db,
+            history=payload.history,
         )
     except AIServiceError as exc:
         raise HTTPException(

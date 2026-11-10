@@ -1,12 +1,18 @@
 from pydantic import BaseModel, Field
 from uuid import UUID
-from typing import Optional, List
+from typing import Literal, Optional, List
+
+
+class ChatHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
 
 
 class AskRequest(BaseModel):
     course_id: UUID
     document_id: Optional[UUID] = None
     question: str = Field(..., min_length=2, max_length=1000)
+    history: List[ChatHistoryMessage] = Field(default_factory=list, max_length=8)
 
 
 class Citation(BaseModel):
