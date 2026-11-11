@@ -22,6 +22,9 @@ class CoursesViewModel(
     private val _uiState = MutableStateFlow<CoursesUiState>(CoursesUiState.Loading)
     val uiState: StateFlow<CoursesUiState> = _uiState.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private val _isCreating = MutableStateFlow(false)
     val isCreating: StateFlow<Boolean> = _isCreating.asStateFlow()
 
@@ -40,6 +43,22 @@ class CoursesViewModel(
                         _uiState.value = CoursesUiState.Error(err.message ?: "Lỗi tải danh sách môn học.")
                     }
                 }
+        }
+    }
+
+    fun refreshCourses() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            repository.getCourses()
+                .onSuccess { list -> _uiState.value = CoursesUiState.Success(list) }
+                .onFailure { err ->
+                    if (_uiState.value !is CoursesUiState.Success) {
+                        _uiState.value = CoursesUiState.Error(err.message ?: "Lỗi tải danh sách môn học.")
+                    } else {
+                        _actionError.value = err.message ?: "Không thể làm mới danh sách môn học."
+                    }
+                }
+            _isRefreshing.value = false
         }
     }
 

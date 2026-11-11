@@ -2,16 +2,25 @@ package com.studyflow.ai.ui.screens.assistant
 
 import android.content.res.Configuration
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +28,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -40,7 +51,10 @@ import com.studyflow.ai.data.model.AssistantSessionResponse
 import com.studyflow.ai.data.model.Citation
 import com.studyflow.ai.ui.components.EmptyStateView
 import com.studyflow.ai.ui.components.LoadingStateView
+import com.studyflow.ai.ui.components.TactileSurface
 import com.studyflow.ai.ui.theme.StudyFlowTheme
+import com.studyflow.ai.ui.theme.rememberCourseVisualStyle
+import com.studyflow.ai.ui.theme.studyFlowSemanticColors
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -67,9 +81,9 @@ fun AssistantScreen(
     val messagesLoading by viewModel.messagesLoading.collectAsState()
     val historyError by viewModel.historyError.collectAsState()
     val coursesLoading by viewModel.coursesLoading.collectAsState()
+    val semanticColors = studyFlowSemanticColors()
 
     var inputText by remember { mutableStateOf("") }
-    var courseMenuExpanded by remember { mutableStateOf(false) }
     var docMenuExpanded by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
     var sessionPendingDelete by remember { mutableStateOf<AssistantSessionResponse?>(null) }
@@ -95,58 +109,98 @@ fun AssistantScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+    LaunchedEffect(messages.size, isAsking) {
+        val lastIdx = messages.size + if (isAsking) 0 else -1
+        if (lastIdx >= 0) {
+            listState.animateScrollToItem(lastIdx)
         }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Trợ lý AI", fontWeight = FontWeight.Bold)
-                        selectedCourse?.let { course ->
-                            val subtitle = activeSession?.title ?: "Đoạn chat mới"
-                            Text(
-                                text = "${course.name} • $subtitle",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Trợ lý AI",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    selectedCourse?.let { course ->
+                        val subtitle = activeSession?.title ?: "Đoạn chat mới"
+                        Text(
+                            text = "${course.name} · $subtitle",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                },
-                actions = {
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     if (selectedCourse != null) {
-                        IconButton(
+                        Surface(
                             onClick = { showHistorySheet = true },
-                            enabled = !isAsking
+                            enabled = !isAsking,
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, semanticColors.cardBorder)
                         ) {
-                            if (sessions.isNotEmpty()) {
-                                BadgedBox(
-                                    badge = {
-                                        Badge {
-                                            Text(
-                                                text = if (sessions.size > 99) "99+" else sessions.size.toString()
-                                            )
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Outlined.History, contentDescription = "Lịch sử phiên chat")
-                                }
-                            } else {
-                                Icon(Icons.Outlined.History, contentDescription = "Lịch sử phiên chat")
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.History,
+                                    contentDescription = "Lịch sử phiên chat",
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (sessions.isNotEmpty()) "Lịch sử (${sessions.size})" else "Lịch sử",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
+
                         if (activeSession != null || messages.isNotEmpty()) {
-                            IconButton(
+                            Surface(
                                 onClick = { viewModel.startNewSession() },
-                                enabled = !isAsking && !messagesLoading
+                                enabled = !isAsking && !messagesLoading,
+                                shape = RoundedCornerShape(50),
+                                color = semanticColors.selectedPill
                             ) {
-                                Icon(Icons.Outlined.AddComment, contentDescription = "Đoạn chat mới")
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = "Đoạn chat mới",
+                                        modifier = Modifier.size(15.dp),
+                                        tint = semanticColors.onSelectedPill
+                                    )
+                                    Text(
+                                        text = "Mới",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = semanticColors.onSelectedPill
+                                    )
+                                }
                             }
                             IconButton(
                                 onClick = {
@@ -157,26 +211,41 @@ fun AssistantScreen(
                                         viewModel.clearUnsavedDraft()
                                     }
                                 },
-                                enabled = !isAsking && !messagesLoading
+                                enabled = !isAsking && !messagesLoading,
+                                modifier = Modifier.size(36.dp)
                             ) {
-                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "Xóa đoạn chat hiện tại")
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = "Xóa đoạn chat hiện tại",
+                                    modifier = Modifier.size(19.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
+
                     IconButton(
                         onClick = { viewModel.loadCourses(preferredCourseId, silent = courses.isNotEmpty()) },
-                        enabled = !isAsking && !messagesLoading
+                        enabled = !isAsking && !messagesLoading,
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Làm mới",
+                            modifier = Modifier.size(19.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
+                }
+            }
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .imePadding()
+        ) {
             if (coursesLoading) {
                 LoadingStateView("Đang tải ngữ cảnh môn học...")
             } else if (courses.isEmpty()) {
@@ -187,60 +256,101 @@ fun AssistantScreen(
                     onActionClick = onNavigateToCourses
                 )
             } else {
-                // Bộ chọn môn học (group ngữ cảnh)
-                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    ExposedDropdownMenuBox(
-                        expanded = courseMenuExpanded,
-                        onExpandedChange = { courseMenuExpanded = !courseMenuExpanded }
-                    ) {
-                        OutlinedTextField(
-                            value = selectedCourse?.name ?: "Chọn môn học",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Ngữ cảnh môn học") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = courseMenuExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = courseMenuExpanded,
-                            onDismissRequest = { courseMenuExpanded = false }
+                // Row 1: Horizontal 1-Tap Course Context Switcher Pills + Document Scope Selector
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(courses, key = { it.id }) { course ->
+                        val isSelected = selectedCourse?.id == course.id
+                        val courseStyle = rememberCourseVisualStyle(seed = course.id)
+                        Surface(
+                            onClick = {
+                                if (!isAsking && !messagesLoading) {
+                                    viewModel.selectCourse(course)
+                                }
+                            },
+                            shape = RoundedCornerShape(50),
+                            color = if (isSelected) semanticColors.selectedPill else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) semanticColors.selectedPill else semanticColors.cardBorder
+                            )
                         ) {
-                            courses.forEach { course ->
-                                DropdownMenuItem(
-                                    text = { Text("${course.name} (${course.documentCount} tài liệu)") },
-                                    onClick = {
-                                        viewModel.selectCourse(course)
-                                        courseMenuExpanded = false
-                                    }
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) Color(0xFFA5B4FC) else courseStyle.accent)
+                                )
+                                Text(
+                                    text = course.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isSelected) semanticColors.onSelectedPill else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
                 }
 
-                // Bộ chọn tài liệu tùy chọn (nếu môn có tài liệu đã sẵn sàng)
-                if (documents.isNotEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        ExposedDropdownMenuBox(
-                            expanded = docMenuExpanded,
-                            onExpandedChange = { docMenuExpanded = !docMenuExpanded }
-                        ) {
-                            OutlinedTextField(
-                                value = selectedDocument?.title ?: "Tất cả tài liệu đã sẵn sàng (${documents.size})",
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Tài liệu cụ thể (tùy chọn)") },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = docMenuExpanded) },
-                                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            ExposedDropdownMenu(
+                // Compact Document Filter Pill & Active Session Scope Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (documents.isNotEmpty()) {
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            Surface(
+                                onClick = { docMenuExpanded = true },
+                                shape = RoundedCornerShape(50),
+                                color = semanticColors.lavenderBento,
+                                border = BorderStroke(1.dp, semanticColors.lavenderBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Description,
+                                        contentDescription = null,
+                                        tint = semanticColors.lavenderContent,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = selectedDocument?.title ?: "Tài liệu: Tất cả (${documents.size})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = semanticColors.lavenderContent,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Outlined.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = semanticColors.lavenderContent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(
                                 expanded = docMenuExpanded,
                                 onDismissRequest = { docMenuExpanded = false }
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Tất cả tài liệu đã sẵn sàng") },
+                                    text = { Text("Tất cả tài liệu đã sẵn sàng (${documents.size})") },
                                     onClick = {
                                         viewModel.selectDocument(null)
                                         docMenuExpanded = false
@@ -248,7 +358,7 @@ fun AssistantScreen(
                                 )
                                 documents.forEach { doc ->
                                     DropdownMenuItem(
-                                        text = { Text(doc.title) },
+                                        text = { Text(doc.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         onClick = {
                                             viewModel.selectDocument(doc)
                                             docMenuExpanded = false
@@ -257,35 +367,59 @@ fun AssistantScreen(
                                 }
                             }
                         }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = semanticColors.butterBento,
+                            border = BorderStroke(1.dp, semanticColors.butterBorder)
+                        ) {
+                            Text(
+                                text = "Môn này chưa có tài liệu sẵn sàng",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = semanticColors.butterContent,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
                     }
-                } else {
-                    Text(
-                        text = "Môn này chưa có tài liệu nào ở trạng thái sẵn sàng. Bạn vẫn có thể hỏi thử hoặc tải PDF/TXT lên ở tab Môn học.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
+
+                    if (sessions.isNotEmpty()) {
+                        Surface(
+                            onClick = { showHistorySheet = true },
+                            enabled = !isAsking && !messagesLoading,
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, semanticColors.cardBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (activeSession != null) Icons.Outlined.Forum else Icons.Outlined.EditNote,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = activeSession?.title ?: if (sessionsLoading) "Đang tải..." else "${sessions.size} phiên",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 120.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
-                // Thanh chuyển nhanh phiên chat theo đúng group môn học
-                selectedCourse?.let { currentCourse ->
-                    SessionContextStrip(
-                        courseName = currentCourse.name,
-                        activeSession = activeSession,
-                        sessionCount = sessions.size,
-                        sessionsLoading = sessionsLoading,
-                        hasMessages = messages.isNotEmpty(),
-                        isBusy = isAsking || messagesLoading,
-                        onOpenHistory = { showHistorySheet = true },
-                        onStartNewSession = { viewModel.startNewSession() }
-                    )
-                }
-
-                // Thông báo lỗi khi tải/xóa lịch sử nếu có
+                // Error notice bar
                 historyError?.let { errMsg ->
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -310,7 +444,7 @@ fun AssistantScreen(
                     }
                 }
 
-                // Danh sách tin nhắn
+                // Conversation / Empty 2x2 Bento Prompt Grid
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (messagesLoading) {
                         LoadingStateView("Đang tải lịch sử đoạn chat...")
@@ -320,76 +454,150 @@ fun AssistantScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .verticalScroll(rememberScrollState())
-                                .padding(
-                                    horizontal = 20.dp,
-                                    vertical = if (hasExistingSessions) 10.dp else 16.dp
-                                ),
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = if (hasExistingSessions) Arrangement.Top else Arrangement.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (hasExistingSessions) 34.dp else 52.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.height(if (hasExistingSessions) 6.dp else 10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = semanticColors.lavenderBento,
+                                border = BorderStroke(1.dp, semanticColors.lavenderBorder),
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "Đoạn chat mới • ${selectedCourse?.name ?: ""}",
+                                text = "Đoạn chat mới · ${selectedCourse?.name ?: ""}",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.ExtraBold,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Đặt câu hỏi về kiến thức trong môn '${selectedCourse?.name ?: ""}'. Mỗi đoạn chat lưu tách biệt theo môn và dẫn nguồn xác thực.",
+                                text = "Trả lời bám sát giáo trình môn '${selectedCourse?.name ?: ""}' kèm nguồn & số trang xác thực.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
+
                             if (documents.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(if (hasExistingSessions) 10.dp else 16.dp))
+                                Spacer(modifier = Modifier.height(14.dp))
                                 Text(
-                                    text = "Gợi ý câu hỏi nhanh:",
+                                    text = "Gợi ý hỏi nhanh",
                                     style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                val suggestions = listOf(
-                                    "Tóm tắt nội dung chính từng tài liệu",
-                                    "Tổng hợp các khái niệm quan trọng nhất",
-                                    "Giải thích quy trình và kỹ thuật cốt lõi",
-                                    "Liệt kê ví dụ thực tế trong tài liệu"
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                val promptCards = listOf(
+                                    QuadPrompt(
+                                        title = "Tóm tắt ý chính",
+                                        prompt = "Tóm tắt nội dung chính từng tài liệu",
+                                        icon = Icons.Outlined.Summarize,
+                                        bg = semanticColors.lavenderBento,
+                                        lip = semanticColors.lavenderLip,
+                                        border = semanticColors.lavenderBorder,
+                                        fg = semanticColors.lavenderContent
+                                    ),
+                                    QuadPrompt(
+                                        title = "Khái niệm cốt lõi",
+                                        prompt = "Tổng hợp các khái niệm quan trọng nhất",
+                                        icon = Icons.Outlined.Lightbulb,
+                                        bg = semanticColors.mintBento,
+                                        lip = semanticColors.mintLip,
+                                        border = semanticColors.mintBorder,
+                                        fg = semanticColors.mintContent
+                                    ),
+                                    QuadPrompt(
+                                        title = "Quy trình & Kỹ thuật",
+                                        prompt = "Giải thích quy trình và kỹ thuật cốt lõi",
+                                        icon = Icons.Outlined.AccountTree,
+                                        bg = semanticColors.butterBento,
+                                        lip = semanticColors.butterLip,
+                                        border = semanticColors.butterBorder,
+                                        fg = semanticColors.butterContent
+                                    ),
+                                    QuadPrompt(
+                                        title = "Ví dụ thực tế",
+                                        prompt = "Liệt kê ví dụ thực tế trong tài liệu",
+                                        icon = Icons.AutoMirrored.Outlined.MenuBook,
+                                        bg = semanticColors.skyBento,
+                                        lip = semanticColors.skyLip,
+                                        border = semanticColors.skyBorder,
+                                        fg = semanticColors.skyContent
+                                    )
                                 )
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    suggestions.forEach { prompt ->
-                                        SuggestionChip(
-                                            onClick = { viewModel.askQuestion(prompt) },
-                                            enabled = !isAsking && selectedCourse != null,
-                                            label = {
-                                                Text(
-                                                    text = prompt,
-                                                    style = MaterialTheme.typography.labelMedium
-                                                )
-                                            },
-                                            icon = {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.QuestionAnswer,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
+
+                                promptCards.chunked(2).forEachIndexed { rowIdx, rowItems ->
+                                    if (rowIdx > 0) Spacer(modifier = Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(IntrinsicSize.Max),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        rowItems.forEach { card ->
+                                            TactileSurface(
+                                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                                containerColor = card.bg,
+                                                lipColor = card.lip,
+                                                borderColor = card.border,
+                                                shape = RoundedCornerShape(18.dp),
+                                                lipHeight = 3.dp,
+                                                fillHeight = true,
+                                                enabled = !isAsking && selectedCourse != null,
+                                                onClick = { viewModel.askQuestion(card.prompt) }
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(12.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = card.icon,
+                                                            contentDescription = null,
+                                                            tint = card.fg,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                        Icon(
+                                                            imageVector = Icons.Outlined.NorthEast,
+                                                            contentDescription = null,
+                                                            tint = card.fg.copy(alpha = 0.7f),
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = card.title,
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
                                             }
-                                        )
+                                        }
                                     }
                                 }
                             }
+
                             if (hasExistingSessions) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                HorizontalDivider()
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                HorizontalDivider(color = semanticColors.cardBorder)
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -398,7 +606,7 @@ fun AssistantScreen(
                                     Text(
                                         text = "Hoặc tiếp tục chat cũ (${selectedCourse?.name})",
                                         style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
+                                        fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     if (sessions.size > 3) {
@@ -422,7 +630,7 @@ fun AssistantScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(messages, key = { it.id }) { msg ->
@@ -444,18 +652,7 @@ fun AssistantScreen(
                             }
                             if (isAsking) {
                                 item(key = "loading_indicator") {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(8.dp)
-                                    ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Đang truy xuất đa tài liệu và tổng hợp câu trả lời...",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    ThinkingTypingBubble()
                                 }
                             } else {
                                 val lastMsg = messages.lastOrNull()
@@ -463,8 +660,8 @@ fun AssistantScreen(
                                     item(key = "follow_up_${lastMsg.id}") {
                                         val followUps = listOf(
                                             "Giải thích chi tiết hơn",
-                                            "Cho ví dụ cụ thể trong tài liệu",
-                                            "Tóm tắt thành ý chính ngắn gọn"
+                                            "Cho ví dụ cụ thể",
+                                            "Tạo câu hỏi ôn tập"
                                         )
                                         Column(modifier = Modifier.padding(top = 2.dp)) {
                                             Text(
@@ -478,16 +675,21 @@ fun AssistantScreen(
                                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
                                                 followUps.forEach { followUp ->
-                                                    SuggestionChip(
+                                                    Surface(
                                                         onClick = { viewModel.askQuestion(followUp) },
                                                         enabled = selectedCourse != null,
-                                                        label = {
-                                                            Text(
-                                                                text = followUp,
-                                                                style = MaterialTheme.typography.labelMedium
-                                                            )
-                                                        }
-                                                    )
+                                                        shape = RoundedCornerShape(50),
+                                                        color = semanticColors.butterBento,
+                                                        border = BorderStroke(1.dp, semanticColors.butterBorder)
+                                                    ) {
+                                                        Text(
+                                                            text = followUp,
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = semanticColors.butterContent,
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -498,34 +700,54 @@ fun AssistantScreen(
                     }
                 }
 
-                // Ô nhập câu hỏi
-                Surface(
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
+                // Rounded Pill Composer Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("Nhập câu hỏi của bạn...") },
-                            modifier = Modifier.weight(1f),
-                            maxLines = 3,
-                            shape = RoundedCornerShape(20.dp)
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = {
+                            Text(
+                                text = "Hỏi về tài liệu ${selectedCourse?.name ?: ""}...",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        maxLines = 3,
+                        shape = RoundedCornerShape(28.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = semanticColors.cardBorder
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        FilledIconButton(
-                            onClick = {
+                    )
+                    val canSend = inputText.isNotBlank() && !isAsking && !messagesLoading && selectedCourse != null
+                    Surface(
+                        onClick = {
+                            if (canSend) {
                                 viewModel.askQuestion(inputText)
                                 inputText = ""
-                            },
-                            enabled = inputText.isNotBlank() && !isAsking && !messagesLoading && selectedCourse != null
-                        ) {
-                            Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Gửi câu hỏi")
+                            }
+                        },
+                        enabled = canSend,
+                        shape = CircleShape,
+                        color = if (canSend) MaterialTheme.colorScheme.primary else semanticColors.cardBorder,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.Send,
+                                contentDescription = "Gửi câu hỏi",
+                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -581,90 +803,65 @@ fun AssistantScreen(
     }
 }
 
-@Composable
-private fun SessionContextStrip(
-    courseName: String,
-    activeSession: AssistantSessionResponse?,
-    sessionCount: Int,
-    sessionsLoading: Boolean,
-    hasMessages: Boolean,
-    isBusy: Boolean,
-    onOpenHistory: () -> Unit,
-    onStartNewSession: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-            modifier = Modifier
-                .weight(1f)
-                .clickable(enabled = !isBusy) { onOpenHistory() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = if (activeSession != null) Icons.Outlined.Forum else Icons.Outlined.EditNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                val label = when {
-                    activeSession != null -> "Tiếp tục: ${activeSession.title}"
-                    sessionsLoading && sessionCount == 0 -> "Đang tải phiên chat..."
-                    sessionCount > 0 -> "Đoạn chat mới ($sessionCount phiên đã lưu)"
-                    else -> "Đoạn chat mới • $courseName"
-                }
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.Outlined.UnfoldMore,
-                    contentDescription = "Chọn phiên chat",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
+private data class QuadPrompt(
+    val title: String,
+    val prompt: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val bg: Color,
+    val lip: Color,
+    val border: Color,
+    val fg: Color
+)
 
-        if (activeSession != null || hasMessages) {
-            FilledTonalButton(
-                onClick = onStartNewSession,
-                enabled = !isBusy,
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Icon(Icons.Outlined.AddComment, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Chat mới", style = MaterialTheme.typography.labelMedium)
+@Composable
+private fun ThinkingTypingBubble() {
+    val semanticColors = studyFlowSemanticColors()
+    val infiniteTransition = rememberInfiniteTransition(label = "thinkingDots")
+    val dot1 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(480), RepeatMode.Reverse),
+        label = "d1"
+    )
+    val dot2 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(480, delayMillis = 160), RepeatMode.Reverse),
+        label = "d2"
+    )
+    val dot3 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(480, delayMillis = 320), RepeatMode.Reverse),
+        label = "d3"
+    )
+
+    TactileSurface(
+        modifier = Modifier.wrapContentWidth(),
+        shape = RoundedCornerShape(18.dp),
+        lipHeight = 3.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(dot1, dot2, dot3).forEach { alpha ->
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .alpha(alpha)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
             }
-        } else if (sessionCount > 0) {
-            OutlinedButton(
-                onClick = onOpenHistory,
-                enabled = !isBusy,
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Chat cũ ($sessionCount)", style = MaterialTheme.typography.labelMedium)
-            }
+            Text(
+                text = "Đang truy xuất đa tài liệu...",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -674,12 +871,15 @@ private fun RecentSessionShortcutCard(
     session: AssistantSessionResponse,
     onClick: () -> Unit
 ) {
-    OutlinedCard(
+    val semanticColors = studyFlowSemanticColors()
+    TactileSurface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
+        lipHeight = 3.dp,
+        borderColor = semanticColors.cardBorder,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -688,7 +888,7 @@ private fun RecentSessionShortcutCard(
                 Text(
                     text = session.title,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -703,9 +903,10 @@ private fun RecentSessionShortcutCard(
             Spacer(modifier = Modifier.height(4.dp))
             val docScope = session.documentTitle ?: "Tất cả tài liệu"
             Text(
-                text = "$docScope • ${session.messageCount} tin nhắn",
+                text = "$docScope · ${session.messageCount} tin nhắn",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -765,11 +966,15 @@ private fun SessionHistoryBottomSheet(
                 onClick = onStartNewSession,
                 enabled = !isBusy,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Icon(Icons.Outlined.AddComment, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Bắt đầu đoạn chat mới cho môn $courseName")
+                Text(
+                    text = "Bắt đầu đoạn chat mới cho môn $courseName",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -784,7 +989,7 @@ private fun SessionHistoryBottomSheet(
             } else if (sessions.isEmpty()) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -805,7 +1010,7 @@ private fun SessionHistoryBottomSheet(
                         OutlinedCard(
                             onClick = { onSelectSession(session) },
                             enabled = !isBusy,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             border = BorderStroke(
                                 width = if (isActive) 1.5.dp else 1.dp,
                                 color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
@@ -910,15 +1115,16 @@ private fun ChatBubble(
     onRetry: (() -> Unit)? = null,
     onOpenCitation: ((Citation) -> Unit)? = null
 ) {
+    val semanticColors = studyFlowSemanticColors()
     val align = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = when {
         message.isUser -> MaterialTheme.colorScheme.primary
-        message.isError -> MaterialTheme.colorScheme.errorContainer
+        message.isError -> semanticColors.coralBento
         else -> MaterialTheme.colorScheme.surface
     }
     val contentColor = when {
-        message.isUser -> MaterialTheme.colorScheme.onPrimary
-        message.isError -> MaterialTheme.colorScheme.onErrorContainer
+        message.isUser -> Color.White
+        message.isError -> semanticColors.coralContent
         else -> MaterialTheme.colorScheme.onSurface
     }
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -935,195 +1141,219 @@ private fun ChatBubble(
         }
     }
 
-    val bubbleModifier = if (message.isUser) {
-        Modifier.widthIn(max = 300.dp)
-    } else {
-        Modifier.fillMaxWidth(0.95f)
-    }
-    val borderStroke = if (!message.isUser && !message.isError) {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    } else {
-        null
-    }
-
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = align
     ) {
-        Card(
-            modifier = bubbleModifier,
-            shape = RoundedCornerShape(16.dp),
-            border = borderStroke,
-            colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                if (!message.isUser && !message.isError) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                tint = primaryColor,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Trợ lý StudyFlow",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = primaryColor
-                            )
-                        }
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.clickable {
-                                clipboardManager.setText(AnnotatedString(message.text))
-                                copied = true
-                            }
+        if (message.isUser) {
+            Surface(
+                modifier = Modifier.widthIn(max = 300.dp),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp),
+                color = containerColor,
+                contentColor = contentColor
+            ) {
+                Text(
+                    text = message.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)
+                )
+            }
+        } else {
+            TactileSurface(
+                modifier = Modifier.fillMaxWidth(0.96f),
+                containerColor = containerColor,
+                lipColor = if (message.isError) semanticColors.coralLip else semanticColors.tactileDefaultLip,
+                borderColor = if (message.isError) semanticColors.coralBorder else semanticColors.cardBorder,
+                shape = RoundedCornerShape(20.dp),
+                lipHeight = 3.dp
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    if (!message.isError) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
-                                    contentDescription = "Sao chép câu trả lời",
-                                    tint = if (copied) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
+                                    imageVector = Icons.Outlined.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(15.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (copied) "Đã chép" else "Chép",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (copied) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "Trợ lý StudyFlow",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = primaryColor
                                 )
                             }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                if (message.isUser || message.isError) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                } else {
-                    val formattedBody = remember(message.text, primaryColor, codeBgColor, codeTextColor) {
-                        formatAssistantMarkdown(
-                            rawText = message.text,
-                            headingColor = primaryColor,
-                            codeBgColor = codeBgColor,
-                            codeTextColor = codeTextColor
-                        )
-                    }
-                    Text(
-                        text = formattedBody,
-                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp)
-                    )
-                }
-
-                if (message.isError && message.retryQuestion != null && onRetry != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onRetry,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Thử lại")
-                    }
-                } else if (!message.isUser && !message.isError) {
-                    if (!message.foundInContext) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Không tìm thấy trích dẫn phù hợp trong tài liệu đã nạp.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else if (message.citations.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Nguồn tham khảo (${message.citations.size})",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = primaryColor
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        message.citations.forEach { cite ->
-                            var expanded by remember(cite.chunkId) { mutableStateOf(false) }
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp)
-                                    .animateContentSize()
-                                    .clickable { expanded = !expanded }
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.clickable {
+                                    clipboardManager.setText(AnnotatedString(message.text))
+                                    copied = true
+                                }
                             ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        val pageText = cite.pageNumber?.let { " • Trang $it" } ?: ""
-                                        Text(
-                                            text = "${cite.documentTitle}$pageText",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (onOpenCitation != null) {
-                                            Surface(
-                                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                                                shape = RoundedCornerShape(6.dp),
-                                                modifier = Modifier
-                                                    .padding(horizontal = 6.dp)
-                                                    .clickable { onOpenCitation(cite) }
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(
-                                                        text = cite.pageNumber?.let { "Mở tr.$it" } ?: "Mở",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = primaryColor
-                                                    )
-                                                    Spacer(modifier = Modifier.width(3.dp))
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
-                                                        contentDescription = "Mở tài liệu",
-                                                        tint = primaryColor,
-                                                        modifier = Modifier.size(12.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Icon(
-                                            imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                                            contentDescription = if (expanded) "Thu gọn" else "Xem thêm",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "\"${cite.snippet}\"",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = if (expanded) Int.MAX_VALUE else 3,
-                                        overflow = TextOverflow.Ellipsis
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                                        contentDescription = "Sao chép câu trả lời",
+                                        tint = if (copied) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(13.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (copied) "Đã chép" else "Chép",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (copied) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (message.isError) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = contentColor
+                        )
+                    } else {
+                        val formattedBody = remember(message.text, primaryColor, codeBgColor, codeTextColor) {
+                            formatAssistantMarkdown(
+                                rawText = message.text,
+                                headingColor = primaryColor,
+                                codeBgColor = codeBgColor,
+                                codeTextColor = codeTextColor
+                            )
+                        }
+                        Text(
+                            text = formattedBody,
+                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                            color = contentColor
+                        )
+                    }
+
+                    if (message.isError && message.retryQuestion != null && onRetry != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = onRetry,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Thử lại")
+                        }
+                    } else if (!message.isError) {
+                        if (!message.foundInContext) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Không tìm thấy trích dẫn phù hợp trong tài liệu đã nạp.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else if (message.citations.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider(color = semanticColors.cardBorder)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Nguồn tham khảo (${message.citations.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            message.citations.forEach { cite ->
+                                var expanded by remember(cite.chunkId) { mutableStateOf(false) }
+                                Surface(
+                                    color = semanticColors.lavenderBento.copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .animateContentSize()
+                                        .clickable { expanded = !expanded }
+                                ) {
+                                    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(4.dp)
+                                                .fillMaxHeight()
+                                                .background(primaryColor)
+                                        )
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 10.dp, vertical = 9.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                val pageText = cite.pageNumber?.let { " · Tr. $it" } ?: ""
+                                                Text(
+                                                    text = "${cite.documentTitle}$pageText",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                if (onOpenCitation != null) {
+                                                    Surface(
+                                                        color = semanticColors.selectedPill,
+                                                        shape = RoundedCornerShape(50),
+                                                        modifier = Modifier
+                                                            .padding(start = 6.dp, end = 4.dp)
+                                                            .clickable { onOpenCitation(cite) }
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = cite.pageNumber?.let { "Mở tr.$it" } ?: "Mở",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = semanticColors.onSelectedPill,
+                                                                maxLines = 1
+                                                            )
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Icon(
+                                                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                                                contentDescription = "Mở tài liệu",
+                                                                tint = semanticColors.onSelectedPill,
+                                                                modifier = Modifier.size(11.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                Icon(
+                                                    imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                                    contentDescription = if (expanded) "Thu gọn" else "Xem thêm",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "\"${cite.snippet}\"",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1284,4 +1514,3 @@ private fun ChatBubblePreview() {
         }
     }
 }
-

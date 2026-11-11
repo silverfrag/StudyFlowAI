@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -36,7 +38,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,6 +48,9 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.studyflow.ai.ui.components.ErrorStateView
 import com.studyflow.ai.ui.components.LoadingStateView
+import com.studyflow.ai.ui.components.TactileSurface
+import com.studyflow.ai.ui.theme.BeVietnamProFontFamily
+import com.studyflow.ai.ui.theme.studyFlowSemanticColors
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -84,15 +88,18 @@ fun DocumentViewerScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 title = {
                     Column {
                         Text(
                             text = documentTitle.ifBlank { "Xem tài liệu" },
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -220,15 +227,19 @@ private fun FocusReferenceBanner(
     currentPage: Int,
     onJumpToPage: (Int) -> Unit
 ) {
+    val semanticColors = studyFlowSemanticColors()
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = Modifier.fillMaxWidth()
+        color = semanticColors.lavenderBento,
+        border = BorderStroke(1.dp, semanticColors.lavenderBorder),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (focusTopic.isNotBlank()) {
@@ -243,7 +254,8 @@ private fun FocusReferenceBanner(
                     Text(
                         text = "Trọng tâm cần ôn: $focusTopic",
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = semanticColors.lavenderContent,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -254,20 +266,30 @@ private fun FocusReferenceBanner(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Trang gợi ý:",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = semanticColors.lavenderContent
                     )
                     suggestedPages.forEach { pg ->
-                        FilterChip(
-                            selected = currentPage == pg,
+                        val isCur = currentPage == pg
+                        Surface(
                             onClick = { onJumpToPage(pg) },
-                            label = { Text("Trang $pg", style = MaterialTheme.typography.labelSmall) }
-                        )
+                            shape = RoundedCornerShape(50),
+                            color = if (isCur) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, if (isCur) MaterialTheme.colorScheme.primary else semanticColors.lavenderBorder)
+                        ) {
+                            Text(
+                                text = "Trang $pg",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCur) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -282,6 +304,7 @@ private fun PdfViewerPane(
     onNextPage: () -> Unit,
     onOpenJumpDialog: () -> Unit
 ) {
+    val semanticColors = studyFlowSemanticColors()
     var scale by remember(state.currentPage) { mutableFloatStateOf(1f) }
     var offset by remember(state.currentPage) { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
@@ -291,7 +314,7 @@ private fun PdfViewerPane(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
                 .clipToBounds()
                 .onSizeChanged { viewportSize = it }
                 .pointerInput(state.currentPage) {
@@ -337,8 +360,9 @@ private fun PdfViewerPane(
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, semanticColors.cardBorder),
                     color = Color.White,
                     modifier = sheetSizeModifier.graphicsLayer {
                         scaleX = scale
@@ -358,8 +382,9 @@ private fun PdfViewerPane(
 
             if (state.isRenderingPage) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f)
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    border = BorderStroke(1.dp, semanticColors.cardBorder)
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier
@@ -371,71 +396,107 @@ private fun PdfViewerPane(
             }
         }
 
-        // Thanh điều khiển trang PDF
-        Surface(
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
+        // Rounded Pill Page Control Dock
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Surface(
+                color = semanticColors.floatingDockContainer,
+                border = BorderStroke(1.dp, semanticColors.floatingDockBorder),
+                shape = RoundedCornerShape(50),
+                shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                FilledTonalIconButton(
-                    onClick = onPrevPage,
-                    enabled = state.currentPage > 1
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
-                        contentDescription = "Trang trước"
-                    )
-                }
-
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.clickable(onClick = onOpenJumpDialog)
+                        onClick = onPrevPage,
+                        enabled = state.currentPage > 1,
+                        shape = CircleShape,
+                        color = if (state.currentPage > 1) Color(0xFF282F5E) else Color.Transparent,
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Text(
-                            text = "Trang ${state.currentPage} / ${state.pageCount}",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+                                contentDescription = "Trang trước",
+                                tint = if (state.currentPage > 1) Color.White else Color.White.copy(alpha = 0.35f)
+                            )
+                        }
                     }
 
-                    if (scale > 1.05f) {
-                        AssistChip(
-                            onClick = {
-                                scale = 1f
-                                offset = Offset.Zero
-                            },
-                            label = { Text("1x", style = MaterialTheme.typography.labelMedium) },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Outlined.ZoomOutMap,
-                                    contentDescription = "Thu về 1x",
-                                    modifier = Modifier.size(16.dp)
-                                )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier.clickable(onClick = onOpenJumpDialog)
+                        ) {
+                            Text(
+                                text = "Trang ${state.currentPage} / ${state.pageCount}",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                            )
+                        }
+
+                        if (scale > 1.05f) {
+                            Surface(
+                                onClick = {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                },
+                                shape = RoundedCornerShape(50),
+                                color = Color(0xFF282F5E)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ZoomOutMap,
+                                        contentDescription = "Thu về 1x",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "1x",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
                             }
-                        )
+                        }
                     }
-                }
 
-                FilledTonalIconButton(
-                    onClick = onNextPage,
-                    enabled = state.currentPage < state.pageCount
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                        contentDescription = "Trang sau"
-                    )
+                    Surface(
+                        onClick = onNextPage,
+                        enabled = state.currentPage < state.pageCount,
+                        shape = CircleShape,
+                        color = if (state.currentPage < state.pageCount) Color(0xFF282F5E) else Color.Transparent,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                contentDescription = "Trang sau",
+                                tint = if (state.currentPage < state.pageCount) Color.White else Color.White.copy(alpha = 0.35f)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -444,23 +505,25 @@ private fun PdfViewerPane(
 
 @Composable
 private fun TextViewerPane(content: String) {
+    val semanticColors = studyFlowSemanticColors()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Card(
+        TactileSurface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            shape = RoundedCornerShape(18.dp),
+            lipHeight = 3.dp,
+            borderColor = semanticColors.cardBorder
         ) {
             SelectionContainer {
                 Text(
                     text = content.ifBlank { "(Tài liệu trống)" },
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.SansSerif,
-                        lineHeight = 22.sp
+                        fontFamily = BeVietnamProFontFamily,
+                        lineHeight = 23.sp
                     ),
                     modifier = Modifier.padding(16.dp)
                 )
@@ -482,7 +545,7 @@ private fun JumpToPageDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Đi tới trang") },
+        title = { Text("Đi tới trang", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -498,6 +561,7 @@ private fun JumpToPageDialog(
                         }
                     },
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = input.isNotBlank() && !isValid,
                     modifier = Modifier.fillMaxWidth()
@@ -507,7 +571,8 @@ private fun JumpToPageDialog(
         confirmButton = {
             Button(
                 onClick = { parsed?.let(onConfirm) },
-                enabled = isValid
+                enabled = isValid,
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Text("Mở trang")
             }
@@ -535,4 +600,3 @@ private fun openExternally(context: Context, file: File, mimeType: String): Bool
         false
     }
 }
-

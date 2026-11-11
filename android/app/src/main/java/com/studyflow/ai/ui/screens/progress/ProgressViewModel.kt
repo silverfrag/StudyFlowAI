@@ -27,6 +27,9 @@ class ProgressViewModel(
     private val _uiState = MutableStateFlow<ProgressUiState>(ProgressUiState.Loading)
     val uiState: StateFlow<ProgressUiState> = _uiState.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private val _isStartingPractice = MutableStateFlow(false)
     val isStartingPractice: StateFlow<Boolean> = _isStartingPractice.asStateFlow()
 
@@ -56,6 +59,28 @@ class ProgressViewModel(
                     ?: "Không thể tải dữ liệu tiến độ."
                 _uiState.value = ProgressUiState.Error(err)
             }
+        }
+    }
+
+    fun refreshProgress() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            _practiceError.value = null
+            val summaryRes = repository.getProgressSummary()
+            val recRes = repository.getRecommendations()
+
+            if (summaryRes.isSuccess && recRes.isSuccess) {
+                _uiState.value = ProgressUiState.Success(
+                    summary = summaryRes.getOrThrow(),
+                    recommendations = recRes.getOrThrow()
+                )
+            } else if (_uiState.value !is ProgressUiState.Success) {
+                val err = summaryRes.exceptionOrNull()?.message
+                    ?: recRes.exceptionOrNull()?.message
+                    ?: "Không thể tải dữ liệu tiến độ."
+                _uiState.value = ProgressUiState.Error(err)
+            }
+            _isRefreshing.value = false
         }
     }
 

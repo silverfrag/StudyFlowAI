@@ -22,6 +22,9 @@ class HomeViewModel(
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     fun loadSummary(silent: Boolean = false) {
         viewModelScope.launch {
             if (!silent || _uiState.value !is HomeUiState.Success) {
@@ -36,6 +39,22 @@ class HomeViewModel(
                         _uiState.value = HomeUiState.Error(err.message ?: "Lỗi tải dữ liệu trang chủ.")
                     }
                 }
+        }
+    }
+
+    fun refreshSummary() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            repository.getProgressSummary()
+                .onSuccess { summary ->
+                    _uiState.value = HomeUiState.Success(summary)
+                }
+                .onFailure { err ->
+                    if (_uiState.value !is HomeUiState.Success) {
+                        _uiState.value = HomeUiState.Error(err.message ?: "Lỗi tải dữ liệu trang chủ.")
+                    }
+                }
+            _isRefreshing.value = false
         }
     }
 }

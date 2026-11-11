@@ -36,6 +36,9 @@ class CourseDetailViewModel(
     private val _uiState = MutableStateFlow<CourseDetailUiState>(CourseDetailUiState.Loading)
     val uiState: StateFlow<CourseDetailUiState> = _uiState.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private val _isUploading = MutableStateFlow(false)
     val isUploading: StateFlow<Boolean> = _isUploading.asStateFlow()
 
@@ -102,6 +105,37 @@ class CourseDetailViewModel(
                     ?: "Không thể tải thông tin môn học."
                 _uiState.value = CourseDetailUiState.Error(err)
             }
+        }
+    }
+
+    fun refreshCourseDetail(courseId: String) {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            coroutineScope {
+                val courseDeferred = async { repository.getCourse(courseId) }
+                val docsDeferred = async { repository.getCourseDocuments(courseId) }
+                val quizzesDeferred = async { repository.getCourseQuizzes(courseId) }
+
+                val courseRes = courseDeferred.await()
+                val docsRes = docsDeferred.await()
+                val quizzesRes = quizzesDeferred.await()
+
+                if (courseRes.isSuccess && docsRes.isSuccess) {
+                    val docs = docsRes.getOrThrow()
+                    syncProcessingTimestamps(docs)
+                    _uiState.value = CourseDetailUiState.Success(
+                        course = courseRes.getOrThrow(),
+                        documents = docs,
+                        quizzes = quizzesRes.getOrElse { emptyList() }
+                    )
+                } else if (_uiState.value !is CourseDetailUiState.Success) {
+                    val err = courseRes.exceptionOrNull()?.message
+                        ?: docsRes.exceptionOrNull()?.message
+                        ?: "Không thể tải thông tin môn học."
+                    _uiState.value = CourseDetailUiState.Error(err)
+                }
+            }
+            _isRefreshing.value = false
         }
     }
 
