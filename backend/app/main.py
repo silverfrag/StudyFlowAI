@@ -1,9 +1,12 @@
+from contextlib import asynccontextmanager
+import logging
+import socket
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, init_db
@@ -14,6 +17,39 @@ from app.api.v1.documents import router as documents_router
 from app.api.v1.assistant import router as assistant_router
 from app.api.v1.quizzes import router as quizzes_router
 from app.api.v1.progress import router as progress_router
+
+logger = logging.getLogger(__name__)
+
+
+def _is_db_connection_error(exc: BaseException) -> bool:
+    visited: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if id(cur) in visited:
+            continue
+        visited.add(id(cur))
+        if isinstance(cur, (ConnectionRefusedError, socket.gaierror)):
+            return True
+        if isinstance(cur, OSError) and getattr(cur, "errno", None) in (10061, 10060, 111, 110, 61):
+            return True
+        if cur.__class__.__name__ in {
+            "PostgresConnectionError",
+            "CannotConnectNowError",
+            "ConnectionDoesNotExistError",
+            "InterfaceError",
+        }:
+            return True
+        msg = str(cur).lower()
+        if "connect call failed" in msg or "connection refused" in msg:
+            return True
+        for nxt in (cur.__cause__, cur.__context__):
+            if nxt is not None:
+                stack.append(nxt)
+        sub_excs = getattr(cur, "exceptions", None)
+        if sub_excs:
+            stack.extend(sub_excs)
+    return False
 
 
 @asynccontextmanager
@@ -92,6 +128,33 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "detail": {
                 "code": "HTTP_ERROR",
                 "message": str(detail),
+                "field": None,
+            }
+        },
+    )
+
+
+# Chuẩn hóa mọi lỗi chưa bắt (bao gồm mất kết nối PostgreSQL) về envelope JSON chuẩn
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    if _is_db_connection_error(exc):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": {
+                    "code": "INTERNAL_SERVER_ERROR",
+                    "message": "Không thể kết nối cơ sở dữ liệu PostgreSQL (cổng 5432). Hãy mở Docker Desktop và chạy container studyflow-postgres.",
+                    "field": None,
+                }
+            },
+        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "Lỗi hệ thống nội bộ backend. Vui lòng thử lại sau.",
                 "field": None,
             }
         },

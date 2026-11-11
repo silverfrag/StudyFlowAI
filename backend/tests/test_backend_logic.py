@@ -18,8 +18,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, engine, init_db
-from app.main import app
+from app.core.database import AsyncSessionLocal, engine, get_db, init_db
+from app.main import _is_db_connection_error, app
 from app.models.document import Document, DocumentChunk
 from app.schemas.assistant import ChatHistoryMessage
 from app.services import (
@@ -1215,6 +1215,29 @@ class EndToEndBackendIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(after_del_msgs.status_code, 404)
             remaining_c1 = await client.get(f"/api/v1/courses/{c1_id}/assistant/sessions")
             self.assertEqual([s["id"] for s in remaining_c1.json()], [s1a_id])
+
+    async def test_unhandled_db_and_generic_exceptions_return_standard_error_envelope(self):
+        self.assertTrue(_is_db_connection_error(OSError(10061, "Connect call failed ('127.0.0.1', 5432)")))
+        self.assertFalse(_is_db_connection_error(RuntimeError("unexpected failure")))
+
+        async def _broken_db_dependency():
+            raise OSError("Multiple exceptions: [Errno 10061] Connect call failed ('127.0.0.1', 5432)")
+            yield  # pragma: no cover
+
+        app.dependency_overrides[get_db] = _broken_db_dependency
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://testserver",
+            ) as client:
+                res = await client.get("/api/v1/courses")
+            self.assertEqual(res.status_code, 503)
+            body = res.json()
+            self.assertEqual(body["detail"]["code"], "INTERNAL_SERVER_ERROR")
+            self.assertIn("PostgreSQL", body["detail"]["message"])
+            self.assertIsNone(body["detail"]["field"])
+        finally:
+            app.dependency_overrides.clear()
 
 
 if __name__ == "__main__":
