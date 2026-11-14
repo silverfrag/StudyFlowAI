@@ -76,6 +76,15 @@ Toàn bộ ảnh chụp màn hình được kết xuất trực tiếp từ máy
 
 ---
 
+### 8. Môi trường phát triển & Máy chủ Backend (Dev Environment & Server Docs)
+| Tên tệp | Màn hình / Trạng thái | Phân loại | Điểm nổi bật cho báo cáo |
+| :--- | :--- | :--- | :--- |
+| `29_backend_swagger_docs.png` | **Giao diện Swagger Docs (FastAPI OpenAPI 3.1)** | Backend Server | Giao diện tài liệu tương tác Swagger UI tại `http://127.0.0.1:8000/docs`, hiển thị đầy đủ 23 API endpoints thuộc 6 nhóm router: `Health`, `Courses`, `Documents`, `Assistant`, `Quizzes`, `Progress`. |
+| `30_android_studio_gradle_sync.png` | **Android Studio sau khi Gradle Sync thành công** | IDE & Tooling | Giao diện Android Studio Ladybug (New UI Dark Theme), bảng Build Sync hiển thị `Gradle sync finished in 3 s 412 ms` và `BUILD SUCCESSFUL`, cây thư mục source code module `app` và trình soạn thảo Kotlin. |
+| `31_android_studio_build_run.png` | **Quá trình Build/Run & Chạy trên Emulator Android Studio** | IDE & Runtime | Quy trình build APK thành công (`BUILD SUCCESSFUL in 23s`), cài đặt qua ADB lên máy ảo Pixel 8 Pro, cửa sổ `Running Devices` hiển thị ứng dụng StudyFlow AI đang hoạt động trực tiếp cùng panel logcat. |
+
+---
+
 ## Hướng dẫn sử dụng hình ảnh cho Báo cáo Đồ án
 
 1. **Chèn vào Microsoft Word / Google Docs:**
